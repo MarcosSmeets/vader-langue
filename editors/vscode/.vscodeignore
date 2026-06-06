@@ -1,4 +1,4 @@
-# Arquivos que NÃO vão pro .vsix (mantém node_modules: são deps de runtime do LSP).
+# Files that do NOT go into the .vsix (keep node_modules: they're LSP runtime deps).
 .gitignore
 .vscodeignore
 PUBLISHING.md

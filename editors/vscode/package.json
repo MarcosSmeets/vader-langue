@@ -1,7 +1,7 @@
 {
   "name": "vader",
   "displayName": "Vader Language",
-  "description": "Syntax highlighting + Language Server + geração de código (scaffolding) para a linguagem Vader.",
+  "description": "Syntax highlighting, Language Server, and code generation (scaffolding) for the Vader language.",
   "version": "0.4.0",
   "publisher": "Vader",
   "license": "MIT",
@@ -61,41 +61,41 @@
         "vader.serverPath": {
           "type": "string",
           "default": "vader",
-          "description": "Caminho do executável `vader` usado como language server (`vader lsp`). Use um caminho absoluto se não estiver no PATH."
+          "description": "Path to the `vader` executable used as the language server (`vader lsp`). Use an absolute path if it is not on your PATH."
         },
         "vader.enableLanguageServer": {
           "type": "boolean",
           "default": true,
-          "description": "Liga o language server (diagnósticos em tempo real). Desligue para usar só o realce de sintaxe."
+          "description": "Enables the language server (real-time diagnostics). Turn it off to use syntax highlighting only."
         }
       }
     },
     "commands": [
       {
         "command": "vader.gen.struct",
-        "title": "Gerar Struct",
+        "title": "Generate Struct",
         "category": "Vader"
       },
       {
         "command": "vader.gen.usecase",
-        "title": "Gerar Use Case",
+        "title": "Generate Use Case",
         "category": "Vader"
       },
       {
         "command": "vader.gen.handler",
-        "title": "Gerar Handler",
+        "title": "Generate Handler",
         "category": "Vader"
       },
       {
         "command": "vader.gen.fn",
-        "title": "Gerar Função",
+        "title": "Generate Function",
         "category": "Vader"
       }
     ],
     "submenus": [
       {
         "id": "vader.genMenu",
-        "label": "Vader: Gerar"
+        "label": "Vader: Generate"
       }
     ],
     "menus": {

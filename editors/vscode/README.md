@@ -1,63 +1,63 @@
-# Vader — extensão do VSCode
+# Vader — VS Code extension
 
-Duas coisas:
-1. **Syntax highlighting** (`.vd`) — funciona em qualquer lugar, sem dependências.
-2. **Language Server** — erros de parse e de tipo **em tempo real**, reusando o
-   compilador (`vader lsp`). Precisa do binário `vader` e de um `npm install`.
+Two things:
+1. **Syntax highlighting** (`.vd`) — works everywhere, no dependencies.
+2. **Language Server** — real-time parse and type errors, reusing the
+   compiler (`vader lsp`). Requires the `vader` binary and an `npm install`.
 
-## 1) Syntax highlighting (sem setup)
+## 1) Syntax highlighting (no setup)
 
-Realça comentários, palavras-chave, tipos (`int float bool string error chan map`),
-strings, números, nomes de função e operadores (`<-`, `..`, `->`…). Mais `Ctrl+/` e
-auto-fechamento de `{ [ ( "`.
+Highlights comments, keywords, types (`int float bool string error chan map`),
+strings, numbers, function names, and operators (`<-`, `..`, `->`…). Plus `Ctrl+/`
+and auto-closing of `{ [ ( "`.
 
-Funciona assim que a extensão é carregada — veja "Como rodar" abaixo.
+It works as soon as the extension loads — see "Running" below.
 
-## 2) Language Server (erros em tempo real)
+## 2) Language Server (real-time errors)
 
-O servidor é o **próprio compilador**: `vader lsp` fala o Language Server Protocol por
-stdio e publica diagnósticos com linha:coluna (os mesmos do `vader check`). O cliente
-aqui só lança o processo — nada de reimplementar análise no editor.
+The server is the **compiler itself**: `vader lsp` speaks the Language Server Protocol
+over stdio and publishes diagnostics with line:column (the same ones as `vader check`).
+The client here only launches the process — no editor-side reimplementation of analysis.
 
-Instale as dependências do cliente (uma vez):
+Install the client dependencies (once):
 ```bash
 cd editors/vscode
 npm install
 ```
 
-### ⚠️ WSL: o `vader` é um binário Linux
+### ⚠️ WSL: `vader` is a Linux binary
 
-O toolchain da Vader é compilado no **WSL** (ELF Linux), então o VSCode do **Windows**
-não roda o `vader` direto. Opções, da melhor pra mais simples:
+The Vader toolchain is built on **WSL** (Linux ELF), so VS Code on **Windows**
+can't run `vader` directly. Options, from best to simplest:
 
-- **Recomendado — VSCode + Remote-WSL:** abra o projeto dentro do WSL
-  (`code .` de dentro do Ubuntu, ou "Reopen in WSL"). Aí a extensão roda no contexto
-  Linux e enxerga o `vader`. Configure o caminho do binário se ele não estiver no PATH:
+- **Recommended — VS Code + Remote-WSL:** open the project inside WSL
+  (`code .` from Ubuntu, or "Reopen in WSL"). The extension then runs in the
+  Linux context and can see `vader`. Set the binary path if it isn't on the PATH:
   ```jsonc
   // settings.json
   "vader.serverPath": "/mnt/c/Users/marco/Documents/workspace/side_projects/vader/target/debug/vader"
   ```
-- **Só highlighting:** desligue o servidor e use apenas o realce:
+- **Highlighting only:** turn the server off and use highlighting alone:
   ```jsonc
   "vader.enableLanguageServer": false
   ```
-- **Build nativo no Windows:** se um dia compilar um `vader.exe`, aponte
-  `vader.serverPath` pra ele.
+- **Native Windows build:** if you ever build a `vader.exe`, point
+  `vader.serverPath` at it.
 
-## Como rodar (modo dev)
+## Running (dev mode)
 
-1. Abra a pasta `editors/vscode` no VSCode (no contexto certo — veja acima).
-2. `npm install` (só se quiser o language server).
-3. Pressione **`F5`** → abre uma janela com a extensão carregada.
-4. Abra um `.vd` (ex.: `examples/shapes.vd`). Realce aparece na hora; se o servidor
-   estiver ligado, erros aparecem sublinhados enquanto você digita.
+1. Open the `editors/vscode` folder in VS Code (in the right context — see above).
+2. `npm install` (only if you want the language server).
+3. Press **`F5`** → opens a window with the extension loaded.
+4. Open a `.vd` file (e.g. `examples/shapes.vd`). Highlighting appears immediately; if
+   the server is on, errors are underlined as you type.
 
-Ou instale localmente copiando a pasta pra `~/.vscode/extensions/vader-0.2.0` e reabrindo
-o VSCode.
+Or install it locally by copying the folder to `~/.vscode/extensions/vader-0.4.0` and
+reopening VS Code.
 
-## Configurações
+## Settings
 
-| Configuração | Padrão | O que faz |
+| Setting | Default | What it does |
 |---|---|---|
-| `vader.serverPath` | `vader` | Caminho do executável usado como `vader lsp`. |
-| `vader.enableLanguageServer` | `true` | Liga/desliga os diagnósticos em tempo real. |
+| `vader.serverPath` | `vader` | Path to the executable used as `vader lsp`. |
+| `vader.enableLanguageServer` | `true` | Enables/disables real-time diagnostics. |
