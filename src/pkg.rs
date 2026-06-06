@@ -146,6 +146,101 @@ pub fn write_deps(toml: &str, deps: &[Dep]) -> String {
     out
 }
 
+// ===================== registro de pacotes ==============================
+// Um registro é um `index.json` (mapa nome -> {url, version}) num diretório local
+// ou num repo git. Sem servidor dedicado: pode ser um repo no GitHub (estilo tap).
+
+fn registry_is_remote(registry: &str) -> bool {
+    registry.contains("://") || (registry.contains('@') && registry.contains(':'))
+}
+
+/// Resolve o caminho do `index.json` do registro (clona se for repo git).
+pub fn registry_index(registry: &str) -> Result<PathBuf, String> {
+    if registry_is_remote(registry) {
+        let dir = cache_root()
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("registry");
+        if dir.join(".git").exists() {
+            let _ = Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .arg("pull")
+                .arg("--quiet")
+                .status();
+        } else {
+            if let Some(p) = dir.parent() {
+                std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+            let st = Command::new("git")
+                .arg("clone")
+                .arg("--depth")
+                .arg("1")
+                .arg(registry)
+                .arg(&dir)
+                .status()
+                .map_err(|e| format!("git: {}", e))?;
+            if !st.success() {
+                return Err("falha ao clonar o registro".into());
+            }
+        }
+        Ok(dir.join("index.json"))
+    } else {
+        Ok(Path::new(registry).join("index.json"))
+    }
+}
+
+/// Procura um pacote pelo nome no registro.
+pub fn registry_lookup(registry: &str, name: &str) -> Result<Dep, String> {
+    let idx = registry_index(registry)?;
+    let content = std::fs::read_to_string(&idx)
+        .map_err(|e| format!("não consegui ler {}: {}", idx.display(), e))?;
+    let json = crate::json::parse(&content).ok_or("index.json inválido")?;
+    let entry = json
+        .get(name)
+        .ok_or(format!("pacote `{}` não está no registro", name))?;
+    let url = entry
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or("entrada sem `url`")?
+        .to_string();
+    let version = entry
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(Dep {
+        name: name.to_string(),
+        url,
+        version,
+    })
+}
+
+/// Adiciona/atualiza um pacote no `index.json` do registro (escreve local).
+pub fn registry_publish(registry: &str, dep: &Dep) -> Result<(), String> {
+    use crate::json::Json;
+    let idx = registry_index(registry)?;
+    let mut entries: Vec<(String, Json)> = match std::fs::read_to_string(&idx)
+        .ok()
+        .and_then(|c| crate::json::parse(&c))
+    {
+        Some(Json::Obj(o)) => o,
+        _ => Vec::new(),
+    };
+    let entry = Json::Obj(vec![
+        ("url".to_string(), Json::Str(dep.url.clone())),
+        ("version".to_string(), Json::Str(dep.version.clone())),
+    ]);
+    entries.retain(|(k, _)| k != &dep.name);
+    entries.push((dep.name.clone(), entry));
+    if let Some(p) = idx.parent() {
+        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&idx, Json::Obj(entries).to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +267,23 @@ mod tests {
         assert_eq!(derive_name("/tmp/greeter"), "greeter");
         assert_eq!(derive_name("https://github.com/u/greeter.git"), "greeter");
         assert_eq!(derive_name("git@github.com:u/greeter.git"), "greeter");
+    }
+
+    #[test]
+    fn registry_publish_then_lookup() {
+        let dir = std::env::temp_dir().join("vader_reg_unit_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = dir.to_str().unwrap();
+        let dep = Dep {
+            name: "foo".into(),
+            url: "https://example/foo".into(),
+            version: "v1.2.3".into(),
+        };
+        registry_publish(reg, &dep).unwrap();
+        assert_eq!(registry_lookup(reg, "foo").unwrap(), dep);
+        assert!(registry_lookup(reg, "ausente").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

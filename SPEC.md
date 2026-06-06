@@ -149,8 +149,13 @@ pra LLVM mexe só na última caixa.
       embarcado e linkado pelo clang no backend nativo. API `open/exec/query/next/col_int/col_text/col_float/close`.
       **Zero instalação, binário self-contained.** `examples/db_sqlite.vd` roda (persiste em arquivo). Cache do `.o`.
 - [x] **Driver Postgres** (wire protocol puro + SCRAM-SHA-256, `postgres://...`) — compila,
-      verificação ao vivo pendente (sem servidor de teste). Mesma API do SQLite.
-- [ ] Postgres com TLS (cloud) + auth MD5 + driver MySQL/Mongo — próxima fase
+      crypto (SHA-256) validada com vetor conhecido; round-trip ao vivo pendente. Mesma API.
+- [x] **Driver MySQL/MariaDB** (protocolo nativo + `mysql_native_password`/SHA-1, `mysql://...`)
+      — compila, crypto (SHA-1) validada; round-trip ao vivo pendente.
+- [x] **TLS pro Postgres** (`vader llvm --tls`) — SSLRequest + OpenSSL sob `#ifdef VADER_TLS`,
+      opt-in (sem libssl pra quem não usa). Código compila contra a API do OpenSSL; link real
+      precisa de `libssl-dev` + servidor TLS pra verificar. v1 sem verificação de certificado.
+- [ ] Auth MD5 (legado) + caching_sha2 do MySQL 8 + driver Mongo — próxima fase
 - [x] **Execução real das migrations** — `vader migrate up/down [--db <dsn>]` (ou `[database] url`
       no vader.toml) roda o SQL no banco via `std/db` (`db.must` aborta se falhar; só marca
       aplicada em sucesso). **Verificado contra SQLite** (up cria+seed, down reverte).
@@ -158,7 +163,10 @@ pra LLVM mexe só na última caixa.
       `git clone` num cache (`~/.vader/pkg`), `[dependencies]` no `vader.toml` + `vader.lock`
       (commit pinado). `module::load` faz fetch e injeta os `.vd` da dep no projeto. **Verificado
       end-to-end** (dep git local → `check`/`run`). `src/pkg.rs`.
-- [ ] **Registro central** hospedado (`vader publish` + index) — infra hospedada; git/URL já cobre o essencial
+- [x] **Registro de pacotes** — `vader add <nome> [--registry <dir|git-url>]` resolve por um
+      `index.json` (dir local ou repo git, sem servidor dedicado); `vader publish` registra o
+      pacote no índice. **Verificado** (publish → add por nome → run). Índice central pode ser
+      um repo no GitHub (estilo tap).
 
 ### Robustez (em andamento)
 - [x] Posições (linha:coluna) nos erros do type checker

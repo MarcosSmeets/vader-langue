@@ -18,6 +18,8 @@ const SQLITE_H: &str = include_str!("../runtime/sqlite/sqlite3.h");
 const VADER_DB_C: &str = include_str!("../runtime/vader_db.c");
 /// Driver Postgres (wire protocol puro: TCP + auth SCRAM + simple query).
 const VADER_PG_C: &str = include_str!("../runtime/vader_pg.c");
+/// Driver MySQL/MariaDB (protocolo nativo + mysql_native_password).
+const VADER_MYSQL_C: &str = include_str!("../runtime/vader_mysql.c");
 
 use vader::ast::Program;
 use vader::{
@@ -39,7 +41,9 @@ fn usage() {
     eprintln!("  vader lint <file.vd> [--arch <arch>]   check architecture rules");
     eprintln!("  vader migrate <new|gen|status|up|down> [name]   manage SQL migrations");
     eprintln!("  vader add <git-url|path>[@version] [name]   add a dependency (git/URL)");
+    eprintln!("  vader add <name> [--registry <dir|git-url>]  add by name via a registry");
     eprintln!("  vader remove <name>        remove a dependency");
+    eprintln!("  vader publish [--registry <dir|git-url>]   register this package in a registry");
     eprintln!("  vader test <file.vd>       run test blocks + coverage report");
     eprintln!("       --min-coverage <n>  override the gate threshold");
     eprintln!("       --no-gate           do not fail on low coverage");
@@ -92,6 +96,9 @@ fn main() -> ExitCode {
     }
     if args.get(1).map(String::as_str) == Some("remove") {
         return cmd_remove(&args);
+    }
+    if args.get(1).map(String::as_str) == Some("publish") {
+        return cmd_publish(&args);
     }
     if args.get(1).map(String::as_str) == Some("fmt") {
         return cmd_fmt(&args);
@@ -252,13 +259,37 @@ fn cmd_add(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (url, version) = pkg::split_source(src);
-    let name = args.get(3).cloned().unwrap_or_else(|| pkg::derive_name(&url));
-    let dep = pkg::Dep {
-        name: name.clone(),
-        url: url.clone(),
-        version: version.clone(),
+    // `add <nome>` (sem barra/scheme) resolve pelo registro; senão é URL/caminho.
+    let dep = if is_bare_name(src) {
+        let reg = match resolve_registry(args) {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "`{}` parece um nome de pacote — passe --registry <dir|git-url>, defina VADER_REGISTRY, ou use a URL/caminho completo",
+                    src
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        match pkg::registry_lookup(&reg, src) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let (url, version) = pkg::split_source(src);
+        let name = args
+            .get(3)
+            .filter(|a| !a.starts_with("--"))
+            .cloned()
+            .unwrap_or_else(|| pkg::derive_name(&url));
+        pkg::Dep { name, url, version }
     };
+    let name = dep.name.clone();
+    let url = dep.url.clone();
+    let version = dep.version.clone();
 
     println!("buscando `{}` de {}...", name, url);
     let commit = match pkg::fetch(&dep) {
@@ -307,6 +338,99 @@ fn cmd_remove(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `vader publish [--registry <dir|git-url>]` — registra o pacote atual no índice.
+fn cmd_publish(args: &[String]) -> ExitCode {
+    let registry = match resolve_registry(args) {
+        Some(r) => r,
+        None => {
+            eprintln!("informe o registro: --registry <dir|git-url> ou a env VADER_REGISTRY");
+            return ExitCode::FAILURE;
+        }
+    };
+    let toml = std::fs::read_to_string("vader.toml").unwrap_or_default();
+    let name = match toml_top_name(&toml) {
+        Some(n) => n,
+        None => {
+            eprintln!("vader.toml sem `name = \"...\"` — rode na raiz do projeto");
+            return ExitCode::FAILURE;
+        }
+    };
+    let url = git_output(&["remote", "get-url", "origin"]).unwrap_or_default();
+    if url.is_empty() {
+        eprintln!("sem `git remote origin` — o pacote precisa de um repositório git");
+        return ExitCode::FAILURE;
+    }
+    let version = git_output(&["describe", "--tags", "--abbrev=0"]).unwrap_or_default();
+    let dep = pkg::Dep {
+        name: name.clone(),
+        url: url.clone(),
+        version: version.clone(),
+    };
+    match pkg::registry_publish(&registry, &dep) {
+        Ok(()) => {
+            let v = if version.is_empty() {
+                "(sem tag)".to_string()
+            } else {
+                version
+            };
+            println!("publicado `{}` -> {} @ {} no registro {}", name, url, v, registry);
+            println!("(se o registro for um repo git, faça commit+push do index.json)");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Registro alvo: flag `--registry <reg>` ou env `VADER_REGISTRY`.
+fn resolve_registry(args: &[String]) -> Option<String> {
+    if let Some(i) = args.iter().position(|a| a == "--registry") {
+        return args.get(i + 1).cloned();
+    }
+    std::env::var("VADER_REGISTRY").ok()
+}
+
+/// Heurística: um nome de pacote não tem barra, scheme nem ponto (≠ URL/caminho).
+fn is_bare_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains('/')
+        && !s.contains('\\')
+        && !s.contains(':')
+        && !s.contains('.')
+}
+
+/// Lê `name = "..."` do topo do `vader.toml` (antes de qualquer seção).
+fn toml_top_name(toml: &str) -> Option<String> {
+    for line in toml.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            break;
+        }
+        if let Some((k, v)) = t.split_once('=') {
+            if k.trim() == "name" {
+                return Some(v.trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Roda `git <args>` e devolve o stdout (trim), ou None em falha/vazio.
+fn git_output(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
 /// Regenera o `vader.lock` com os commits resolvidos de cada dependência.
 fn write_lock(deps: &[pkg::Dep]) {
     let mut out = String::from("# vader.lock — gerado automaticamente; commits resolvidos\n");
@@ -320,7 +444,7 @@ fn write_lock(deps: &[pkg::Dep]) {
 
 /// `vader llvm <file.vd>` — Vader -> LLVM IR (texto) -> clang -> binário nativo -> roda.
 fn cmd_llvm(args: &[String]) -> ExitCode {
-    let path = match args.get(2) {
+    let path = match args.iter().skip(2).find(|a| !a.starts_with("--")) {
         Some(p) => p,
         None => {
             usage();
@@ -334,7 +458,8 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match build_run_source(&source, false) {
+    let tls = args.iter().any(|a| a == "--tls");
+    match build_run_source(&source, false, tls) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{}", e);
@@ -345,7 +470,7 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
 
 /// Compila uma fonte Vader via LLVM + clang e roda o binário (Result, p/ reuso).
 /// `quiet` suprime os logs de progresso (usado pelo `vader migrate`).
-fn build_run_source(source: &str, quiet: bool) -> Result<(), String> {
+fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> {
     let tokens = lexer::tokenize(source).map_err(|e| e.to_string())?;
     let mut program = parser::parse(tokens).map_err(|e| e.to_string())?;
     if !program.imports.is_empty() {
@@ -410,16 +535,18 @@ fn build_run_source(source: &str, quiet: bool) -> Result<(), String> {
         }
         let db_c = dir.join("vader_db.c");
         let pg_c = dir.join("vader_pg.c");
+        let my_c = dir.join("vader_mysql.c");
         std::fs::write(&db_c, VADER_DB_C).map_err(|e| format!("write vader_db.c: {}", e))?;
         std::fs::write(&pg_c, VADER_PG_C).map_err(|e| format!("write vader_pg.c: {}", e))?;
-        cmd.arg(&obj)
-            .arg(&db_c)
-            .arg(&pg_c)
-            .arg("-lpthread")
-            .arg("-ldl")
-            .arg("-lm");
+        std::fs::write(&my_c, VADER_MYSQL_C).map_err(|e| format!("write vader_mysql.c: {}", e))?;
+        cmd.arg(&obj).arg(&db_c).arg(&pg_c).arg(&my_c);
+        if tls {
+            // TLS pro Postgres (cloud): habilita o caminho OpenSSL no driver.
+            cmd.arg("-DVADER_TLS").arg("-lssl").arg("-lcrypto");
+        }
+        cmd.arg("-lpthread").arg("-ldl").arg("-lm");
         if !quiet {
-            println!("(linkando SQLite embarcado + driver Postgres)");
+            println!("(linkando SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
         }
     }
     cmd.arg("-o").arg(&bin);
@@ -480,6 +607,7 @@ fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
     let dsn = resolve_migrate_dsn(args).ok_or(
         "informe o banco: `vader migrate up --db <dsn>` ou defina [database] url no vader.toml",
     )?;
+    let tls = args.iter().any(|a| a == "--tls");
     if up {
         let pend = migrate::pending();
         if pend.is_empty() {
@@ -488,7 +616,7 @@ fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
         }
         for name in pend {
             println!("\u{25B6} aplicando {} ...", name);
-            build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true)
+            build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true, tls)
                 .map_err(|e| format!("falha em {}: {}", name, e))?;
             migrate::mark_applied(&name)?;
         }
@@ -498,7 +626,7 @@ fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
             None => println!("nenhuma migration aplicada."),
             Some(name) => {
                 println!("\u{25C0} revertendo {} ...", name);
-                build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true)
+                build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true, tls)
                     .map_err(|e| format!("falha ao reverter {}: {}", name, e))?;
                 migrate::unmark(&name)?;
                 println!("ok — revertida {}", name);
