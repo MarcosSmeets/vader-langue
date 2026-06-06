@@ -46,6 +46,11 @@ pub struct Checker {
     methods: HashMap<(String, String), FnSig>,
     structs: HashMap<String, Vec<(String, Ty)>>,
     enums: HashSet<String>,
+    interfaces: HashSet<String>,
+    /// nomes de parâmetros de tipo (genéricos) — polimórficos, não erram no resolve
+    type_params: HashSet<String>,
+    /// handles opacos da stdlib (DB/Rows/Server/Json/Conn) — resolvem sem erro
+    opaque: HashSet<String>,
     /// nome da variante -> (tipos dos campos, nome do enum)
     variant_ctors: HashMap<String, (Vec<Ty>, String)>,
     scopes: Vec<HashMap<String, Ty>>,
@@ -62,6 +67,12 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
         methods: HashMap::new(),
         structs: HashMap::new(),
         enums: HashSet::new(),
+        interfaces: HashSet::new(),
+        type_params: HashSet::new(),
+        opaque: ["DB", "Rows", "Server", "Json", "Conn"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         variant_ctors: HashMap::new(),
         scopes: Vec::new(),
         current_returns: Vec::new(),
@@ -73,12 +84,34 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
     if c.errors.is_empty() {
         Ok(())
     } else {
+        // remove erros idênticos (ex.: tipo desconhecido visto na sig e no corpo)
+        let mut seen = HashSet::new();
+        c.errors
+            .retain(|e| seen.insert((e.line, e.col, e.message.clone())));
         Err(c.errors)
     }
 }
 
 impl Checker {
     fn run(&mut self, program: &Program) {
+        // Pass 0: nomes de interface + união de TODOS os type params do programa
+        // (pro `resolve` distinguir "tipo desconhecido" de "parâmetro genérico").
+        for item in &program.items {
+            let tps = match item {
+                Item::Function(f) => &f.type_params,
+                Item::Struct(s) => &s.type_params,
+                Item::Interface(i) => &i.type_params,
+                Item::Enum(e) => &e.type_params,
+                _ => continue,
+            };
+            for tp in tps {
+                self.type_params.insert(tp.name.clone());
+            }
+            if let Item::Interface(i) = item {
+                self.interfaces.insert(i.name.clone());
+            }
+        }
+
         // Pass 1a: register struct names (so cross-references resolve).
         for item in &program.items {
             if let Item::Struct(s) = item {
@@ -91,11 +124,11 @@ impl Checker {
         // Pass 1b: fill struct fields.
         for item in &program.items {
             if let Item::Struct(s) = item {
-                let fields = s
-                    .fields
-                    .iter()
-                    .map(|f| (f.name.clone(), self.resolve(&f.ty)))
-                    .collect();
+                let mut fields = Vec::new();
+                for f in &s.fields {
+                    let ty = self.resolve(&f.ty);
+                    fields.push((f.name.clone(), ty));
+                }
                 self.structs.insert(s.name.clone(), fields);
             }
         }
@@ -108,7 +141,10 @@ impl Checker {
         for item in &program.items {
             if let Item::Enum(e) = item {
                 for v in &e.variants {
-                    let ptys = v.fields.iter().map(|f| self.resolve(&f.ty)).collect();
+                    let mut ptys = Vec::new();
+                    for f in &v.fields {
+                        ptys.push(self.resolve(&f.ty));
+                    }
                     self.variant_ctors
                         .insert(v.name.clone(), (ptys, e.name.clone()));
                 }
@@ -117,10 +153,15 @@ impl Checker {
         // Pass 2: register function / method signatures.
         for item in &program.items {
             if let Item::Function(f) = item {
-                let sig = FnSig {
-                    params: f.params.iter().map(|p| self.resolve(&p.ty)).collect(),
-                    returns: f.returns.iter().map(|t| self.resolve(t)).collect(),
-                };
+                let mut params = Vec::new();
+                for p in &f.params {
+                    params.push(self.resolve(&p.ty));
+                }
+                let mut returns = Vec::new();
+                for t in &f.returns {
+                    returns.push(self.resolve(t));
+                }
+                let sig = FnSig { params, returns };
                 match &f.receiver {
                     Some(recv) => {
                         if let Ty::Struct(s) = self.resolve(&recv.ty) {
@@ -223,7 +264,7 @@ impl Checker {
         }
     }
 
-    fn resolve(&self, t: &Type) -> Ty {
+    fn resolve(&mut self, t: &Type) -> Ty {
         match t {
             Type::Named(n) => match n.as_str() {
                 "int" => Ty::Int,
@@ -236,8 +277,14 @@ impl Checker {
                         Ty::Struct(n.clone())
                     } else if self.enums.contains(n) {
                         Ty::Enum(n.clone())
+                    } else if self.interfaces.contains(n)
+                        || self.opaque.contains(n)
+                        || self.type_params.contains(n)
+                    {
+                        Ty::Unknown // interface / handle opaco / param genérico: polimórfico
                     } else {
-                        Ty::Unknown // type param genérico ou tipo externo
+                        self.error(format!("unknown type `{}`", n));
+                        Ty::Unknown
                     }
                 }
             },
@@ -250,7 +297,7 @@ impl Checker {
     }
 
     /// Converte uma expressão que representa um tipo (ex.: `int` em `chan[int]`).
-    fn type_from_expr(&self, e: &Expr) -> Ty {
+    fn type_from_expr(&mut self, e: &Expr) -> Ty {
         match &e.kind {
             ExprKind::Ident(n) => self.resolve(&Type::Named(n.clone())),
             _ => Ty::Unknown,
@@ -350,7 +397,11 @@ impl Checker {
             let t = self.resolve(&p.ty);
             self.declare(&p.name, t);
         }
-        self.current_returns = f.returns.iter().map(|t| self.resolve(t)).collect();
+        let mut crets = Vec::new();
+        for t in &f.returns {
+            crets.push(self.resolve(t));
+        }
+        self.current_returns = crets;
         self.check_block(&f.body);
         self.scopes.pop();
     }
@@ -936,6 +987,23 @@ mod tests {
     #[test]
     fn clean_program_ok() {
         ok("fn add(a, b int): int { return a + b }");
+    }
+
+    #[test]
+    fn rejects_unknown_type() {
+        fails("fn f() { Foo x = nil }"); // tipo local desconhecido
+        fails("fn g(x Bar) { }"); // tipo desconhecido em assinatura
+    }
+
+    #[test]
+    fn generic_and_interface_types_ok() {
+        ok("fn id[T](x T): T { return x }"); // param de tipo é polimórfico
+        ok("interface Shape { fn area(): float }\nfn f(s Shape) { }"); // interface resolve
+    }
+
+    #[test]
+    fn stdlib_opaque_types_ok() {
+        ok("fn f(d DB, s Server, j Json) { }"); // handles opacos da stdlib
     }
 
     #[test]

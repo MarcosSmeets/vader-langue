@@ -176,6 +176,10 @@ pra LLVM mexe só na última caixa.
 ### Robustez (em andamento)
 - [x] Posições (linha:coluna) nos erros do type checker
 - [x] Detecção de declarações duplicadas
+- [x] **Type checker estrito** — nome de tipo desconhecido vira **erro** (`unknown type \`Foo\``),
+      não mais `Unknown` silencioso. Preserva o que é legitimamente polimórfico: parâmetros de
+      tipo (genéricos), interfaces e handles opacos da stdlib (`DB/Rows/Server/Json/Conn`).
+      Os 11 exemplos puros + scaffold seguem passando; programas com tipo inexistente falham.
 - [x] Lint de arquitetura automático no `build`/`run`/`check`
 - [x] Sistema de módulos v1 — `check`/`build`/`run`/`test` aceitam um diretório; junta os `.vd`, normaliza nomes qualificados (`domain.User`→`User`) e compila como um programa. Projeto multi-pasta vira binário.
 - [x] Checker modela canais; `_` discard; stdlib mínima — `concurrency.vd` e scaffold `clean` buildam
