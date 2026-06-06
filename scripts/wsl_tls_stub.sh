@@ -15,9 +15,9 @@ int SSL_read(SSL *, void *, int);
 int SSL_write(SSL *, const void *, int);
 void SSL_free(SSL *);
 EOF
-echo "=== compila o caminho TLS contra o stub do OpenSSL ==="
+echo "=== compiles the TLS path against the OpenSSL stub ==="
 if clang -c -O2 -DVADER_TLS -I/tmp/sslstub runtime/vader_pg.c -o /tmp/pgtls.o 2>/tmp/t.log; then
-  echo "TLS code compila OK (uso da API do OpenSSL validado)"
+  echo "TLS code compiles OK (OpenSSL API usage validated)"
 else
-  echo "FALHOU:"; grep -E 'error:' /tmp/t.log | head
+  echo "FAILED:"; grep -E 'error:' /tmp/t.log | head
 fi

@@ -1,10 +1,11 @@
-//! Type checker (Fase 1, incremento 1).
+//! Type checker (Phase 1, increment 1).
 //!
-//! Constrói a tabela de símbolos (funções, métodos, structs) e valida os corpos
-//! das funções. É **conservador**: o que ainda não modela (genéricos, canais,
-//! tipos externos) vira `Unknown` e não gera erro — evita falso-positivo.
+//! Builds the symbol table (functions, methods, structs) and validates function
+//! bodies. It is **conservative**: anything it does not yet model (generics,
+//! channels, external types) becomes `Unknown` and produces no error — avoiding
+//! false positives.
 //!
-//! Os erros carregam a posição (linha:coluna) da expressão envolvida.
+//! Errors carry the position (line:column) of the expression involved.
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,7 +18,7 @@ pub struct TypeError {
     pub col: usize,
 }
 
-/// Tipo resolvido usado internamente pela checagem.
+/// Resolved type used internally by the checker.
 #[derive(Debug, Clone, PartialEq)]
 enum Ty {
     Int,
@@ -31,7 +32,7 @@ enum Ty {
     Enum(String),
     Slice(Box<Ty>),
     Chan(Box<Ty>),
-    /// Não foi possível determinar (genérico, tipo externo). Suprime erros.
+    /// Could not be determined (generic, external type). Suppresses errors.
     Unknown,
 }
 
@@ -47,11 +48,11 @@ pub struct Checker {
     structs: HashMap<String, Vec<(String, Ty)>>,
     enums: HashSet<String>,
     interfaces: HashSet<String>,
-    /// nomes de parâmetros de tipo (genéricos) — polimórficos, não erram no resolve
+    /// type parameter names (generics) — polymorphic, don't error on resolve
     type_params: HashSet<String>,
-    /// handles opacos da stdlib (DB/Rows/Server/Json/Conn) — resolvem sem erro
+    /// opaque stdlib handles (DB/Rows/Server/Json/Conn) — resolve without error
     opaque: HashSet<String>,
-    /// nome da variante -> (tipos dos campos, nome do enum)
+    /// variant name -> (field types, enum name)
     variant_ctors: HashMap<String, (Vec<Ty>, String)>,
     scopes: Vec<HashMap<String, Ty>>,
     current_returns: Vec<Ty>,
@@ -84,7 +85,7 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
     if c.errors.is_empty() {
         Ok(())
     } else {
-        // remove erros idênticos (ex.: tipo desconhecido visto na sig e no corpo)
+        // remove identical errors (e.g. unknown type seen in the sig and the body)
         let mut seen = HashSet::new();
         c.errors
             .retain(|e| seen.insert((e.line, e.col, e.message.clone())));
@@ -94,8 +95,8 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
 
 impl Checker {
     fn run(&mut self, program: &Program) {
-        // Pass 0: nomes de interface + união de TODOS os type params do programa
-        // (pro `resolve` distinguir "tipo desconhecido" de "parâmetro genérico").
+        // Pass 0: interface names + union of ALL the program's type params
+        // (so `resolve` can distinguish "unknown type" from "generic parameter").
         for item in &program.items {
             let tps = match item {
                 Item::Function(f) => &f.type_params,
@@ -132,7 +133,7 @@ impl Checker {
                 self.structs.insert(s.name.clone(), fields);
             }
         }
-        // Pass 1c: register enums e seus construtores de variante.
+        // Pass 1c: register enums and their variant constructors.
         for item in &program.items {
             if let Item::Enum(e) = item {
                 self.enums.insert(e.name.clone());
@@ -177,8 +178,8 @@ impl Checker {
                 }
             }
         }
-        // std/db: registra as funções intrínsecas do driver quando o projeto importa.
-        // DB/Rows são handles opacos (resolvem pra Unknown, que é lenient).
+        // std/db: registers the driver's intrinsic functions when the project imports it.
+        // DB/Rows are opaque handles (resolve to Unknown, which is lenient).
         if program.imports.iter().any(|i| i.starts_with("std/db")) {
             use Ty::*;
             let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
@@ -199,7 +200,7 @@ impl Checker {
             }
         }
 
-        // std/http: servidor (Server -> Unknown) + cliente.
+        // std/http: server (Server -> Unknown) + client.
         if program.imports.iter().any(|i| i.starts_with("std/http")) {
             use Ty::*;
             let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
@@ -220,7 +221,7 @@ impl Checker {
             }
         }
 
-        // std/json: parse + acessores + builder + encode (Json -> Unknown).
+        // std/json: parse + accessors + builder + encode (Json -> Unknown).
         if program.imports.iter().any(|i| i.starts_with("std/json")) {
             use Ty::*;
             let sigs: [(&str, Vec<Ty>, Vec<Ty>); 19] = [
@@ -251,7 +252,15 @@ impl Checker {
             }
         }
 
-        // std/mem: arena/região (Arena -> Unknown opaco).
+        // std/env: reading environment variables.
+        if program.imports.iter().any(|i| i.starts_with("std/env")) {
+            self.functions.entry("read".to_string()).or_insert(FnSig {
+                params: vec![Ty::String],
+                returns: vec![Ty::String],
+            });
+        }
+
+        // std/mem: arena/region (Arena -> opaque Unknown).
         if program.imports.iter().any(|i| i.starts_with("std/mem")) {
             use Ty::*;
             let sigs: [(&str, Vec<Ty>, Vec<Ty>); 2] = [
@@ -295,7 +304,7 @@ impl Checker {
                         || self.opaque.contains(n)
                         || self.type_params.contains(n)
                     {
-                        Ty::Unknown // interface / handle opaco / param genérico: polimórfico
+                        Ty::Unknown // interface / opaque handle / generic param: polymorphic
                     } else {
                         self.error(format!("unknown type `{}`", n));
                         Ty::Unknown
@@ -310,7 +319,7 @@ impl Checker {
         }
     }
 
-    /// Converte uma expressão que representa um tipo (ex.: `int` em `chan[int]`).
+    /// Converts an expression that represents a type (e.g. `int` in `chan[int]`).
     fn type_from_expr(&mut self, e: &Expr) -> Ty {
         match &e.kind {
             ExprKind::Ident(n) => self.resolve(&Type::Named(n.clone())),
@@ -356,7 +365,7 @@ impl Checker {
                 Ty::Error | Ty::Struct(_) | Ty::Enum(_) | Ty::Slice(_) | Ty::Chan(_)
             );
         }
-        // slices/canais comparam pelo elemento (deixa genéricos `[]T` passarem)
+        // slices/channels compare by element (lets generic `[]T` pass)
         if let (Ty::Slice(a), Ty::Slice(b)) = (from, to) {
             return self.assignable(a, b);
         }
@@ -836,7 +845,7 @@ impl Checker {
     }
 
     fn infer_call(&mut self, callee: &Expr, args: &[Expr]) -> Ty {
-        // criação de canal: chan[T](buffer)
+        // channel creation: chan[T](buffer)
         let chan_elem = if let ExprKind::Index { base, index } = &callee.kind {
             match &base.kind {
                 ExprKind::Ident(n) if n == "chan" => Some(self.type_from_expr(index)),
@@ -910,14 +919,14 @@ impl Checker {
                 return match sig.returns.len() {
                     0 => Ty::Void,
                     1 => sig.returns[0].clone(),
-                    _ => Ty::Unknown, // múltiplo: tratado em var-decl/return
+                    _ => Ty::Unknown, // multiple: handled in var-decl/return
                 };
             }
             self.error(format!("undeclared function `{}`", name));
             return Ty::Unknown;
         }
 
-        // método ou callee complexo: infere com leniência
+        // method or complex callee: infer leniently
         self.infer(callee);
         Ty::Unknown
     }
@@ -931,7 +940,7 @@ impl Checker {
                     }
                 }
                 if self.methods.contains_key(&(s.clone(), field.to_string())) {
-                    return Ty::Unknown; // acesso a método; será chamado
+                    return Ty::Unknown; // method access; will be called
                 }
                 self.error(format!("struct `{}` has no field `{}`", s, field));
                 Ty::Unknown
@@ -1005,19 +1014,19 @@ mod tests {
 
     #[test]
     fn rejects_unknown_type() {
-        fails("fn f() { Foo x = nil }"); // tipo local desconhecido
-        fails("fn g(x Bar) { }"); // tipo desconhecido em assinatura
+        fails("fn f() { Foo x = nil }"); // unknown local type
+        fails("fn g(x Bar) { }"); // unknown type in signature
     }
 
     #[test]
     fn generic_and_interface_types_ok() {
-        ok("fn id[T](x T): T { return x }"); // param de tipo é polimórfico
-        ok("interface Shape { fn area(): float }\nfn f(s Shape) { }"); // interface resolve
+        ok("fn id[T](x T): T { return x }"); // type param is polymorphic
+        ok("interface Shape { fn area(): float }\nfn f(s Shape) { }"); // interface resolves
     }
 
     #[test]
     fn stdlib_opaque_types_ok() {
-        ok("fn f(d DB, s Server, j Json) { }"); // handles opacos da stdlib
+        ok("fn f(d DB, s Server, j Json) { }"); // opaque stdlib handles
     }
 
     #[test]
@@ -1088,7 +1097,7 @@ mod tests {
         .unwrap();
         let errs = check(&prog).unwrap_err();
         assert_eq!(errs.len(), 1);
-        assert_eq!(errs[0].line, 2); // o valor errado está na linha 2
+        assert_eq!(errs[0].line, 2); // the wrong value is on line 2
     }
 
     #[test]
@@ -1107,7 +1116,7 @@ mod tests {
         let prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         assert!(
             check(&prog).is_ok(),
-            "concurrency.vd deveria checar: {:?}",
+            "concurrency.vd should type-check: {:?}",
             check(&prog).err()
         );
     }

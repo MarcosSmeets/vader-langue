@@ -14,9 +14,9 @@ echo "### vader gen fn somar"
 echo "### vader gen usecase CreateOrder"
 "$BIN" gen usecase CreateOrder
 echo
-echo "=== árvore gerada ==="
+echo "=== generated tree ==="
 find . -type f | sort
-echo "=== somar_test.vd (nasceu sozinho) ==="
+echo "=== somar_test.vd (born on its own) ==="
 cat somar_test.vd
 echo "=== usecase/create_order.vd ==="
 cat usecase/create_order.vd

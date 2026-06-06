@@ -1,11 +1,11 @@
-/* Cliente Postgres (wire protocol v3) do runtime da Vader — self-contained.
+/* Vader runtime Postgres client (wire protocol v3) — self-contained.
  *
- * TCP + StartupMessage + autenticação (trust / cleartext / SCRAM-SHA-256) +
- * Simple Query Protocol, com resultados em formato texto. Sem libpq, sem TLS
- * (v1: conexão sem criptografia — serve PG local/self-hosted sem SSL forçado).
+ * TCP + StartupMessage + authentication (trust / cleartext / SCRAM-SHA-256) +
+ * Simple Query Protocol, with results in text format. No libpq, no TLS
+ * (v1: unencrypted connection — works for local/self-hosted PG without forced SSL).
  *
- * Inclui SHA-256/HMAC/PBKDF2/base64 próprios (domínio público) pro SCRAM.
- * Sem-GC: buffers de resultado vazam, alinhado com o resto do runtime. */
+ * Includes its own SHA-256/HMAC/PBKDF2/base64 (public domain) for SCRAM.
+ * No GC: result buffers leak, in line with the rest of the runtime. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,7 @@
 #include <openssl/ssl.h>
 #endif
 
-/* ===================== SHA-256 (domínio público, Brad Conte) ============== */
+/* ===================== SHA-256 (public domain, Brad Conte) ================ */
 typedef struct {
     unsigned char data[64];
     unsigned int datalen;
@@ -141,7 +141,7 @@ static void hmac_sha256(const unsigned char *key, int keylen,
     sha256_final(&c, out);
 }
 
-/* PBKDF2-HMAC-SHA256, 1 bloco de saída (32 bytes) */
+/* PBKDF2-HMAC-SHA256, 1 output block (32 bytes) */
 static void pbkdf2_sha256(const char *pass, int passlen, const unsigned char *salt,
                           int saltlen, int iter, unsigned char out[32]) {
     unsigned char buf[128], u[32], t[32];
@@ -230,19 +230,19 @@ static unsigned int get32(const unsigned char *p) {
     return ((unsigned int)p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
 }
 
-/* ===================== conexão, estruturas e IO =========================== */
+/* ===================== connection, structs and IO ========================= */
 typedef struct {
     int fd;
-    void *ssl; /* SSL* quando TLS está ativo (NULL = texto puro) */
+    void *ssl; /* SSL* when TLS is active (NULL = plaintext) */
     char err[256];
 } PgConn;
 
 typedef struct {
     int ncols, nrows, cur;
-    char ***cells; /* cells[row][col] (texto, ou NULL) */
+    char ***cells; /* cells[row][col] (text, or NULL) */
 } PgRows;
 
-/* IO que passa por TLS quando ativo, senão direto no socket. */
+/* IO that goes through TLS when active, otherwise straight to the socket. */
 static int io_read(PgConn *c, unsigned char *buf, int n) {
 #ifdef VADER_TLS
     if (c->ssl) {
@@ -272,12 +272,12 @@ static int io_write(PgConn *c, const unsigned char *buf, int n) {
     return write_all(c->fd, buf, n);
 }
 
-/* Lê uma mensagem do backend: 1 byte de tipo + int32 len. Aloca o corpo. */
+/* Reads a message from the backend: 1 type byte + int32 len. Allocates the body. */
 static int pg_read_msg(PgConn *c, char *type, unsigned char **body, int *bodylen) {
     unsigned char hdr[5];
     if (io_read(c, hdr, 5) < 0) return -1;
     *type = hdr[0];
-    int len = get32(hdr + 1); /* inclui os 4 bytes do próprio len */
+    int len = get32(hdr + 1); /* includes the 4 bytes of len itself */
     *bodylen = len - 4;
     if (*bodylen < 0) return -1;
     *body = malloc(*bodylen > 0 ? *bodylen : 1);
@@ -285,7 +285,7 @@ static int pg_read_msg(PgConn *c, char *type, unsigned char **body, int *bodylen
     return 0;
 }
 
-/* envia uma mensagem tipada (tipo + len + corpo) */
+/* sends a typed message (type + len + body) */
 static int pg_send(PgConn *c, char type, const unsigned char *body, int bodylen) {
     unsigned char hdr[5];
     hdr[0] = type;
@@ -295,7 +295,7 @@ static int pg_send(PgConn *c, char type, const unsigned char *body, int bodylen)
     return 0;
 }
 
-/* nonce aleatório (base64-safe alfanumérico) de /dev/urandom */
+/* random nonce (base64-safe alphanumeric) from /dev/urandom */
 static void gen_nonce(char *out, int n) {
     unsigned char raw[64];
     int fd = open("/dev/urandom", 0);
@@ -306,12 +306,12 @@ static void gen_nonce(char *out, int n) {
         for (int i = 0; i < n; i++) raw[i] = (unsigned char)(i * 7 + 13);
     }
     for (int i = 0; i < n; i++) {
-        out[i] = B64[raw[i] % 62]; /* só alfanumérico */
+        out[i] = B64[raw[i] % 62]; /* alphanumeric only */
     }
     out[n] = 0;
 }
 
-/* parse de DSN postgres://user:pass@host:port/db */
+/* parse of DSN postgres://user:pass@host:port/db */
 static void dsn_parse(const char *dsn, char *user, char *pass, char *host,
                       int *port, char *db) {
     user[0] = pass[0] = host[0] = db[0] = 0;
@@ -330,7 +330,7 @@ static void dsn_parse(const char *dsn, char *user, char *pass, char *host,
         }
         p = at + 1;
     }
-    /* host:port/db (corta query string) */
+    /* host:port/db (strips query string) */
     const char *slash = strchr(p, '/');
     const char *hostend = slash ? slash : p + strlen(p);
     const char *colon = memchr(p, ':', hostend - p);
@@ -349,7 +349,7 @@ static void dsn_parse(const char *dsn, char *user, char *pass, char *host,
     if (!db[0]) strcpy(db, user);
 }
 
-/* autenticação SCRAM-SHA-256. Retorna 0 em sucesso. */
+/* SCRAM-SHA-256 authentication. Returns 0 on success. */
 static int scram_auth(PgConn *c, const char *user, const char *pass) {
     (void)user;
     char cnonce[33];
@@ -357,7 +357,7 @@ static int scram_auth(PgConn *c, const char *user, const char *pass) {
     char client_first_bare[128];
     snprintf(client_first_bare, sizeof(client_first_bare), "n=,r=%s", cnonce);
 
-    /* SASLInitialResponse: mecanismo + int32 len + client-first ("n,," + bare) */
+    /* SASLInitialResponse: mechanism + int32 len + client-first ("n,," + bare) */
     char gs2[160];
     snprintf(gs2, sizeof(gs2), "n,,%s", client_first_bare);
     const char *mech = "SCRAM-SHA-256";
@@ -370,10 +370,10 @@ static int scram_auth(PgConn *c, const char *user, const char *pass) {
     pg_send(c,'p', init, initlen);
     free(init);
 
-    /* espera 'R' 11 (SASLContinue) com server-first */
+    /* expects 'R' 11 (SASLContinue) with server-first */
     char type; unsigned char *body; int blen;
     if (pg_read_msg(c,&type, &body, &blen) < 0) return -1;
-    if (type == 'E') { strncpy(c->err, "erro de auth (server-first)", 255); return -1; }
+    if (type == 'E') { strncpy(c->err, "auth error (server-first)", 255); return -1; }
     if (type != 'R' || get32(body) != 11) return -1;
     char server_first[256];
     int sflen = blen - 4;
@@ -415,9 +415,9 @@ static int scram_auth(PgConn *c, const char *user, const char *pass) {
     free(proof_b64);
     pg_send(c,'p', (unsigned char *)client_final, strlen(client_final));
 
-    /* espera 'R' 12 (SASLFinal) e depois 'R' 0 (AuthOk) */
+    /* expects 'R' 12 (SASLFinal) and then 'R' 0 (AuthOk) */
     if (pg_read_msg(c,&type, &body, &blen) < 0) return -1;
-    if (type == 'E') { strncpy(c->err, "auth SCRAM rejeitada (senha?)", 255); return -1; }
+    if (type == 'E') { strncpy(c->err, "SCRAM auth rejected (password?)", 255); return -1; }
     if (type != 'R') return -1;
     unsigned int code = get32(body);
     free(body);
@@ -429,13 +429,13 @@ static int scram_auth(PgConn *c, const char *user, const char *pass) {
     return code == 0 ? 0 : -1;
 }
 
-/* lê do backend até ReadyForQuery após a fase de auth (ParameterStatus etc.) */
+/* reads from the backend until ReadyForQuery after the auth phase (ParameterStatus etc.) */
 static int pg_consume_until_ready(PgConn *c) {
     for (;;) {
         char type; unsigned char *body; int blen;
         if (pg_read_msg(c,&type, &body, &blen) < 0) return -1;
         if (type == 'E') {
-            strncpy(c->err, "erro do servidor após auth", sizeof(c->err) - 1);
+            strncpy(c->err, "server error after auth", sizeof(c->err) - 1);
             free(body);
             return -1;
         }
@@ -444,7 +444,7 @@ static int pg_consume_until_ready(PgConn *c) {
     }
 }
 
-/* abre conexão: TCP + startup + auth. Retorna handle ou NULL. */
+/* opens connection: TCP + startup + auth. Returns handle or NULL. */
 PgConn *vader_pg_connect(const char *dsn) {
     char user[128], pass[128], host[128], db[128];
     int port;
@@ -468,11 +468,11 @@ PgConn *vader_pg_connect(const char *dsn) {
     c->fd = fd;
 
 #ifdef VADER_TLS
-    /* negociação TLS: manda SSLRequest (texto puro). 'S' = aceita -> handshake. */
+    /* TLS negotiation: sends SSLRequest (plaintext). 'S' = accepts -> handshake. */
     {
         unsigned char req[8];
         put32(req, 8);
-        put32(req + 4, 80877103); /* código mágico do SSLRequest */
+        put32(req + 4, 80877103); /* SSLRequest magic code */
         if (write_all(fd, req, 8) == 0) {
             unsigned char resp = 0;
             if (read_n(fd, &resp, 1) == 0 && resp == 'S') {
@@ -481,15 +481,15 @@ PgConn *vader_pg_connect(const char *dsn) {
                     SSL *ssl = SSL_new(ctx);
                     SSL_set_fd(ssl, fd);
                     if (SSL_connect(ssl) == 1) {
-                        c->ssl = ssl; /* v1: sem verificação de certificado */
+                        c->ssl = ssl; /* v1: no certificate verification */
                     } else {
-                        strcpy(c->err, "handshake TLS falhou");
+                        strcpy(c->err, "TLS handshake failed");
                         c->fd = -1;
                         return c;
                     }
                 }
             }
-            /* 'N' = servidor sem TLS: segue em texto puro (estilo sslmode=prefer) */
+            /* 'N' = server without TLS: continues in plaintext (sslmode=prefer style) */
         }
     }
 #endif
@@ -506,11 +506,11 @@ PgConn *vader_pg_connect(const char *dsn) {
     put32(start + 4, 196608);
     if (io_write(c, start, o) < 0) { c->fd = -1; return c; }
 
-    /* loop de autenticação */
+    /* authentication loop */
     for (;;) {
         char type; unsigned char *body; int blen;
-        if (pg_read_msg(c, &type, &body, &blen) < 0) { strcpy(c->err, "conexão caiu"); c->fd = -1; return c; }
-        if (type == 'E') { strcpy(c->err, "erro do servidor no startup"); free(body); c->fd = -1; return c; }
+        if (pg_read_msg(c, &type, &body, &blen) < 0) { strcpy(c->err, "connection dropped"); c->fd = -1; return c; }
+        if (type == 'E') { strcpy(c->err, "server error at startup"); free(body); c->fd = -1; return c; }
         if (type != 'R') { free(body); continue; }
         unsigned int code = get32(body);
         if (code == 0) { free(body); break; }               /* AuthenticationOk */
@@ -524,9 +524,9 @@ PgConn *vader_pg_connect(const char *dsn) {
             if (scram_auth(c, user, pass) < 0) { c->fd = -1; return c; }
             continue;
         }
-        /* MD5 (5) e outros não suportados no v1 */
+        /* MD5 (5) and others not supported in v1 */
         free(body);
-        snprintf(c->err, sizeof(c->err), "método de auth %u não suportado (use trust/password/scram)", code);
+        snprintf(c->err, sizeof(c->err), "auth method %u not supported (use trust/password/scram)", code);
         c->fd = -1;
         return c;
     }
@@ -538,7 +538,7 @@ const char *vader_pg_error(PgConn *c) {
     return (c && c->fd < 0 && c->err[0]) ? strdup(c->err) : 0;
 }
 
-/* extrai a mensagem de uma ErrorResponse ('E'): campos tipo+string\0, fim em \0 */
+/* extracts the message from an ErrorResponse ('E'): type+string\0 fields, end at \0 */
 static char *pg_error_text(const unsigned char *body, int blen) {
     int i = 0;
     while (i < blen && body[i] != 0) {
@@ -548,13 +548,13 @@ static char *pg_error_text(const unsigned char *body, int blen) {
         if (field == 'M') return strdup(val); /* Message */
         i += len + 1;
     }
-    return strdup("erro do Postgres");
+    return strdup("Postgres error");
 }
 
-/* executa uma query via Simple Query; bufferiza linhas em texto. */
+/* runs a query via Simple Query; buffers rows as text. */
 static PgRows *pg_run(PgConn *c, const char *sql, char **errout) {
     *errout = 0;
-    if (!c || c->fd < 0) { *errout = strdup("conexão inválida"); return 0; }
+    if (!c || c->fd < 0) { *errout = strdup("invalid connection"); return 0; }
     int qlen = strlen(sql) + 1;
     pg_send(c,'Q', (const unsigned char *)sql, qlen);
 
@@ -564,7 +564,7 @@ static PgRows *pg_run(PgConn *c, const char *sql, char **errout) {
     for (;;) {
         char type; unsigned char *body; int blen;
         if (pg_read_msg(c,&type, &body, &blen) < 0) {
-            *errout = strdup("conexão caiu durante a query");
+            *errout = strdup("connection dropped during the query");
             return rows;
         }
         if (type == 'T') { /* RowDescription */
@@ -592,7 +592,7 @@ static PgRows *pg_run(PgConn *c, const char *sql, char **errout) {
         } else if (type == 'E') {
             *errout = pg_error_text(body, blen);
             free(body);
-            /* drena até ReadyForQuery */
+            /* drains until ReadyForQuery */
             for (;;) {
                 char t2; unsigned char *b2; int l2;
                 if (pg_read_msg(c,&t2, &b2, &l2) < 0) break;
@@ -609,11 +609,11 @@ static PgRows *pg_run(PgConn *c, const char *sql, char **errout) {
     return rows;
 }
 
-/* API exposta pro Vader (mesma forma do SQLite). */
+/* API exposed to Vader (same shape as SQLite). */
 const char *vader_pg_exec(PgConn *c, const char *sql) {
     char *err;
     pg_run(c, sql, &err);
-    return err; /* NULL em sucesso */
+    return err; /* NULL on success */
 }
 
 PgRows *vader_pg_query(PgConn *c, const char *sql) {

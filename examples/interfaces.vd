@@ -1,4 +1,4 @@
-// interfaces.vd — despacho dinâmico via interface no backend LLVM.
+// interfaces.vd — dynamic dispatch via interface in the LLVM backend.
 
 interface Animal {
     fn sound(): string
@@ -30,5 +30,5 @@ fn main() {
     print(describe(x))   // woof
 
     Cat c = Cat{ name: "Tom" }
-    print(describe(c))   // meow  (Cat -> Animal na chamada)
+    print(describe(c))   // meow  (Cat -> Animal at the call)
 }

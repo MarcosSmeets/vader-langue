@@ -1,9 +1,9 @@
-//! `vader fmt`: reimprime a AST no estilo canônico único da Vader.
+//! `vader fmt`: reprints the AST in Vader's single canonical style.
 //!
-//! Garantias (verificadas nos testes): **idempotência** — `fmt(fmt(x)) == fmt(x)` —
-//! e **preservação de significado** — `parse(fmt(x))` tem a mesma AST que `parse(x)`.
+//! Guarantees (verified in tests): **idempotency** — `fmt(fmt(x)) == fmt(x)` —
+//! and **meaning preservation** — `parse(fmt(x))` has the same AST as `parse(x)`.
 //!
-//! Limitação conhecida: comentários ainda não são preservados (a AST não os guarda).
+//! Known limitation: comments are not yet preserved (the AST does not store them).
 
 use crate::ast::*;
 
@@ -12,7 +12,7 @@ struct Formatter {
     indent: usize,
 }
 
-/// Formata um programa Vader para a sua forma canônica.
+/// Formats a Vader program into its canonical form.
 pub fn format(program: &Program) -> String {
     let mut fm = Formatter {
         out: String::new(),
@@ -81,7 +81,7 @@ impl Formatter {
         format!("[{}]", parts.join(", "))
     }
 
-    /// Agrupa parâmetros consecutivos do mesmo tipo: `a, b int`.
+    /// Groups consecutive parameters of the same type: `a, b int`.
     fn params_str(&self, params: &[Param]) -> String {
         let mut out = Vec::new();
         let mut i = 0;
@@ -113,7 +113,7 @@ impl Formatter {
     fn vis(&self, v: Visibility) -> &'static str {
         match v {
             Visibility::Public => "public ",
-            Visibility::Private => "", // private é o padrão; omitido na forma canônica
+            Visibility::Private => "", // private is the default; omitted in the canonical form
         }
     }
 
@@ -360,7 +360,7 @@ impl Formatter {
         }
     }
 
-    // ---- expressions (com parênteses mínimos por precedência) ----
+    // ---- expressions (with minimal parentheses by precedence) ----
 
     fn expr(&self, e: &Expr) -> String {
         self.expr_p(e, 0)
@@ -427,7 +427,7 @@ impl Formatter {
                 format!("[{}]", es.join(", "))
             }
             ExprKind::Recv(inner) => format!("<-{}", self.expr_p(inner, 8)),
-            // match aninhado em expressão é raro; o nível de statement cuida do caso normal.
+            // a match nested in an expression is rare; the statement level handles the normal case.
             ExprKind::Match { scrutinee, .. } => format!("match {} {{ ... }}", self.expr(scrutinee)),
         }
     }
@@ -493,7 +493,7 @@ mod tests {
             let reparsed = parse(&formatted);
             assert_eq!(
                 original, reparsed,
-                "fmt mudou a AST de:\n{}\n--- formatado ---\n{}",
+                "fmt changed the AST of:\n{}\n--- formatted ---\n{}",
                 src, formatted
             );
         }
@@ -504,7 +504,7 @@ mod tests {
         for src in EXAMPLES {
             let once = format(&parse(src));
             let twice = format(&parse(&once));
-            assert_eq!(once, twice, "fmt não é idempotente");
+            assert_eq!(once, twice, "fmt is not idempotent");
         }
     }
 

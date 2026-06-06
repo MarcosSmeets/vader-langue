@@ -1,6 +1,6 @@
 //! The Vader compiler library.
 //!
-//! Fase 1: lexer + parser + type checker + backend (transpile-to-Go).
+//! Phase 1: lexer + parser + type checker + backend (transpile-to-Go).
 //! See `SPEC.md` and `docs/` for the design.
 
 pub mod ast;

@@ -1,14 +1,14 @@
-//! Gerenciador de pacotes (v1): dependências por **git/URL**, sem registro hospedado.
+//! Package manager (v1): dependencies via **git/URL**, no hosted registry.
 //!
-//! Cada dependência declarada no `[dependencies]` do `vader.toml` é resolvida com
-//! `git clone` num cache local (`~/.vader/pkg`) e seus `.vd` entram no projeto pelo
-//! sistema de módulos. Um registro central hospedado é uma camada futura por cima disto.
+//! Each dependency declared in the `[dependencies]` of `vader.toml` is resolved with
+//! `git clone` into a local cache (`~/.vader/pkg`) and its `.vd` files enter the project via
+//! the module system. A central hosted registry is a future layer on top of this.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Uma dependência: `name` é o pacote usado no `import`, `url` é a fonte git
-/// (URL http(s)/ssh ou caminho local), `version` é uma tag/branch (vazio = default).
+/// A dependency: `name` is the package used in `import`, `url` is the git source
+/// (http(s)/ssh URL or local path), `version` is a tag/branch (empty = default).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dep {
     pub name: String,
@@ -16,7 +16,7 @@ pub struct Dep {
     pub version: String,
 }
 
-/// Raiz do cache de pacotes: `~/.vader/pkg`.
+/// Root of the package cache: `~/.vader/pkg`.
 pub fn cache_root() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -24,7 +24,7 @@ pub fn cache_root() -> PathBuf {
     Path::new(&home).join(".vader").join("pkg")
 }
 
-/// Diretório de cache de uma dep (`~/.vader/pkg/<name>@<version|default>`).
+/// Cache directory of a dep (`~/.vader/pkg/<name>@<version|default>`).
 pub fn dep_dir(d: &Dep) -> PathBuf {
     let v = if d.version.is_empty() {
         "default"
@@ -34,12 +34,12 @@ pub fn dep_dir(d: &Dep) -> PathBuf {
     cache_root().join(format!("{}@{}", d.name, v))
 }
 
-/// Garante a dep no cache (faz `git clone` se faltar). Retorna (caminho, commit resolvido).
+/// Ensures the dep is in the cache (runs `git clone` if missing). Returns (path, resolved commit).
 pub fn fetch(d: &Dep) -> Result<(PathBuf, String), String> {
     let dir = dep_dir(d);
     if !dir.join(".git").exists() {
         std::fs::create_dir_all(cache_root()).map_err(|e| e.to_string())?;
-        let _ = std::fs::remove_dir_all(&dir); // limpa clone parcial
+        let _ = std::fs::remove_dir_all(&dir); // clean up partial clone
         let mut cmd = Command::new("git");
         cmd.arg("clone").arg("--depth").arg("1");
         if !d.version.is_empty() {
@@ -48,10 +48,10 @@ pub fn fetch(d: &Dep) -> Result<(PathBuf, String), String> {
         cmd.arg(&d.url).arg(&dir);
         let st = cmd
             .status()
-            .map_err(|e| format!("falha ao invocar git (está instalado?): {}", e))?;
+            .map_err(|e| format!("failed to invoke git (is it installed?): {}", e))?;
         if !st.success() {
             return Err(format!(
-                "git clone falhou para `{}` ({})",
+                "git clone failed for `{}` ({})",
                 d.name, d.url
             ));
         }
@@ -67,7 +67,7 @@ pub fn fetch(d: &Dep) -> Result<(PathBuf, String), String> {
     Ok((dir, commit))
 }
 
-/// Deriva o nome do pacote a partir da URL (último segmento, sem `.git`).
+/// Derives the package name from the URL (last segment, without `.git`).
 pub fn derive_name(url: &str) -> String {
     url.trim_end_matches('/')
         .rsplit(['/', ':'])
@@ -77,10 +77,10 @@ pub fn derive_name(url: &str) -> String {
         .to_string()
 }
 
-/// Separa `url[@version]` numa (url, version), respeitando URLs ssh `git@host:...`.
+/// Splits `url[@version]` into a (url, version), respecting ssh URLs `git@host:...`.
 pub fn split_source(src: &str) -> (String, String) {
     match src.rsplit_once('@') {
-        // só é versão se o que vem depois do @ não parece parte de uma URL
+        // only a version if what comes after the @ doesn't look like part of a URL
         Some((u, v)) if !v.contains('/') && !v.contains(':') && !u.is_empty() => {
             (u.to_string(), v.to_string())
         }
@@ -88,7 +88,7 @@ pub fn split_source(src: &str) -> (String, String) {
     }
 }
 
-/// Lê o `[dependencies]` de um conteúdo de `vader.toml` (parser de linha simples).
+/// Reads the `[dependencies]` from a `vader.toml` content (simple line parser).
 pub fn parse_deps(toml: &str) -> Vec<Dep> {
     let mut deps = Vec::new();
     let mut in_section = false;
@@ -113,7 +113,7 @@ pub fn parse_deps(toml: &str) -> Vec<Dep> {
     deps
 }
 
-/// Reescreve o conteúdo do `vader.toml` com a seção `[dependencies]` dada (no fim).
+/// Rewrites the `vader.toml` content with the given `[dependencies]` section (at the end).
 pub fn write_deps(toml: &str, deps: &[Dep]) -> String {
     let mut out = String::new();
     let mut skip = false;
@@ -146,15 +146,15 @@ pub fn write_deps(toml: &str, deps: &[Dep]) -> String {
     out
 }
 
-// ===================== registro de pacotes ==============================
-// Um registro é um `index.json` (mapa nome -> {url, version}) num diretório local
-// ou num repo git. Sem servidor dedicado: pode ser um repo no GitHub (estilo tap).
+// ===================== package registry ==============================
+// A registry is an `index.json` (map name -> {url, version}) in a local directory
+// or in a git repo. No dedicated server: it can be a GitHub repo (tap style).
 
 fn registry_is_remote(registry: &str) -> bool {
     registry.contains("://") || (registry.contains('@') && registry.contains(':'))
 }
 
-/// Resolve o caminho do `index.json` do registro (clona se for repo git).
+/// Resolves the path of the registry's `index.json` (clones if it's a git repo).
 pub fn registry_index(registry: &str) -> Result<PathBuf, String> {
     if registry_is_remote(registry) {
         let dir = cache_root()
@@ -182,7 +182,7 @@ pub fn registry_index(registry: &str) -> Result<PathBuf, String> {
                 .status()
                 .map_err(|e| format!("git: {}", e))?;
             if !st.success() {
-                return Err("falha ao clonar o registro".into());
+                return Err("failed to clone the registry".into());
             }
         }
         Ok(dir.join("index.json"))
@@ -191,19 +191,19 @@ pub fn registry_index(registry: &str) -> Result<PathBuf, String> {
     }
 }
 
-/// Procura um pacote pelo nome no registro.
+/// Looks up a package by name in the registry.
 pub fn registry_lookup(registry: &str, name: &str) -> Result<Dep, String> {
     let idx = registry_index(registry)?;
     let content = std::fs::read_to_string(&idx)
-        .map_err(|e| format!("não consegui ler {}: {}", idx.display(), e))?;
-    let json = crate::json::parse(&content).ok_or("index.json inválido")?;
+        .map_err(|e| format!("could not read {}: {}", idx.display(), e))?;
+    let json = crate::json::parse(&content).ok_or("invalid index.json")?;
     let entry = json
         .get(name)
-        .ok_or(format!("pacote `{}` não está no registro", name))?;
+        .ok_or(format!("package `{}` is not in the registry", name))?;
     let url = entry
         .get("url")
         .and_then(|v| v.as_str())
-        .ok_or("entrada sem `url`")?
+        .ok_or("entry without `url`")?
         .to_string();
     let version = entry
         .get("version")
@@ -217,7 +217,7 @@ pub fn registry_lookup(registry: &str, name: &str) -> Result<Dep, String> {
     })
 }
 
-/// Adiciona/atualiza um pacote no `index.json` do registro (escreve local).
+/// Adds/updates a package in the registry's `index.json` (writes locally).
 pub fn registry_publish(registry: &str, dep: &Dep) -> Result<(), String> {
     use crate::json::Json;
     let idx = registry_index(registry)?;
@@ -282,7 +282,7 @@ mod tests {
         };
         registry_publish(reg, &dep).unwrap();
         assert_eq!(registry_lookup(reg, "foo").unwrap(), dep);
-        assert!(registry_lookup(reg, "ausente").is_err());
+        assert!(registry_lookup(reg, "missing").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,5 +1,5 @@
-// calc.vd — funções + testes, para demonstrar `vader test`.
-// `sub` de propósito NÃO é testada, para a cobertura aparecer < 100%.
+// calc.vd — functions + tests, to demonstrate `vader test`.
+// `sub` is intentionally NOT tested, so coverage shows < 100%.
 
 fn add(a, b int): int {
     return a + b
@@ -9,10 +9,10 @@ fn sub(a, b int): int {
     return a - b
 }
 
-test "add soma dois números" {
+test "add sums two numbers" {
     assert add(2, 3) == 5
 }
 
-test "add é comutativa" {
+test "add is commutative" {
     assert add(1, 2) == add(2, 1)
 }

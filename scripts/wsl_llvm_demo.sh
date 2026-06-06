@@ -7,7 +7,7 @@ BIN="$PWD/target/debug/vader"
 
 echo "########## vader llvm examples/llvm_demo.vd ##########"
 "$BIN" llvm examples/llvm_demo.vd
-echo "=== tipo do binário ==="
+echo "=== binary type ==="
 file /tmp/vader_llvm/out 2>/dev/null
-echo "=== trecho do LLVM IR gerado ==="
+echo "=== snippet of the generated LLVM IR ==="
 head -n 20 /tmp/vader_llvm/out.ll

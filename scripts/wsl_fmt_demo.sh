@@ -16,7 +16,7 @@ if b==0{return 0,error("zero")}
 return a/b,nil}
 EOF
 
-echo "=== ANTES (messy.vd) ==="
+echo "=== BEFORE (messy.vd) ==="
 cat messy.vd
-echo "=== DEPOIS (vader fmt) ==="
+echo "=== AFTER (vader fmt) ==="
 "$BIN" fmt messy.vd

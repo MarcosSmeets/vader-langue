@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Roda a CLI do Vader (via cargo) com cargo e go no PATH, dentro do WSL.
-# Uso: wsl_vader.sh <subcomando> <args...>   (ex.: run examples/hello.vd)
+# Runs the Vader CLI (via cargo) with cargo and go on PATH, inside WSL.
+# Usage: wsl_vader.sh <subcommand> <args...>   (e.g.: run examples/hello.vd)
 set -u
 export PATH="$HOME/.cargo/bin:$HOME/.local/go/bin:$PATH"
 PROJECT="/mnt/c/Users/marco/Documents/workspace/side_projects/vader"

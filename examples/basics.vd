@@ -1,7 +1,7 @@
-// basics.vd — variáveis, funções, structs, erros explícitos.
+// basics.vd — variables, functions, structs, explicit errors.
 
-// Tipagem forte e explícita: o tipo vem na frente (estilo C).
-// Sem let/var/mut, sem inferência. Reatribuição não repete o tipo.
+// Strong and explicit typing: the type comes first (C-style).
+// No let/var/mut, no inference. Reassignment doesn't repeat the type.
 fn demo() {
     string name   = "Vader"
     int    count  = 0
@@ -15,8 +15,8 @@ fn demo() {
     print(MAX_RETRIES)
 }
 
-// Erros são explícitos (estilo Go): nada de exception escondida.
-// `public` exporta a função; sem modificador o padrão é `private`.
+// Errors are explicit (Go-style): no hidden exceptions.
+// `public` exports the function; without a modifier the default is `private`.
 public fn divide(a, b int): (int, error) {
     if b == 0 {
         return 0, error("division by zero")
@@ -24,7 +24,7 @@ public fn divide(a, b int): (int, error) {
     return a / b, nil
 }
 
-// Structs + métodos.
+// Structs + methods.
 public struct User {
     id   int
     name string

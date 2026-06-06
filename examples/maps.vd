@@ -1,4 +1,4 @@
-// maps.vd — maps (hash table) no backend LLVM. Construção via newmap(); chave int ou string.
+// maps.vd — maps (hash table) in the LLVM backend. Construction via newmap(); int or string key.
 
 fn main() {
     map[string]int ages = newmap()

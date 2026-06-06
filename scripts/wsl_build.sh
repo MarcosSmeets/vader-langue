@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Dev helper: roda dentro do WSL (Ubuntu), onde o Rust está instalado.
-# O projeto vive no disco do Windows, acessível em /mnt/c/...
+# Dev helper: runs inside WSL (Ubuntu), where Rust is installed.
+# The project lives on the Windows disk, accessible at /mnt/c/...
 set -u
 
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -14,5 +14,5 @@ if command -v gcc >/dev/null 2>&1; then echo "gcc:    $(command -v gcc)"; else e
 if sudo -n true 2>/dev/null; then echo "sudo:   PASSWORDLESS"; else echo "sudo:   NEEDS-PASSWORD"; fi
 
 echo "=== cargo test ==="
-cd "$PROJECT" || { echo "projeto não encontrado em $PROJECT"; exit 1; }
+cd "$PROJECT" || { echo "project not found at $PROJECT"; exit 1; }
 cargo test --color never 2>&1 | tail -n 40

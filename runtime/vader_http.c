@@ -1,6 +1,6 @@
-/* HTTP/1.1 do runtime da Vader — servidor (loop accept) + cliente (get/post).
- * Self-contained (sockets), sem TLS no v1 (cliente https fica pra depois).
- * Sem-GC: strings retornadas vazam, alinhado com o runtime. */
+/* Vader runtime HTTP/1.1 — server (accept loop) + client (get/post).
+ * Self-contained (sockets), no TLS in v1 (https client comes later).
+ * No GC: returned strings leak, in line with the runtime. */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +11,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
-/* alocador de arena (vader_mem.c): o servidor cicla uma arena por request */
+/* arena allocator (vader_mem.c): the server cycles one arena per request */
 extern void *vader_alloc(long n);
 extern void *vader_realloc(void *old, long oldn, long newn);
 extern char *vader_strdup(const char *s);
@@ -29,15 +29,15 @@ static int h_write_all(int fd, const unsigned char *buf, int n) {
     return 0;
 }
 
-/* ===================== servidor ========================================== */
+/* ===================== server ============================================ */
 typedef struct {
-    int lfd; /* socket de escuta */
-    int cfd; /* conexão atual (-1 = nenhuma) */
+    int lfd; /* listening socket */
+    int cfd; /* current connection (-1 = none) */
     char method[16];
     char *path;
     char *body;
-    char *headers; /* bloco cru de cabeçalhos (inclui a request line) */
-    void *req_arena; /* arena da request atual (liberada na próxima accept) */
+    char *headers; /* raw header block (includes the request line) */
+    void *req_arena; /* current request's arena (freed on the next accept) */
 } HttpServer;
 
 void *vader_http_listen(long port) {
@@ -58,7 +58,7 @@ void *vader_http_listen(long port) {
     return s;
 }
 
-/* aceita uma conexão e faz o parse do request. 1 = ok, 0 = erro. Bloqueia. */
+/* accepts a connection and parses the request. 1 = ok, 0 = error. Blocks. */
 int vader_http_accept(void *sv) {
     HttpServer *s = sv;
     if (!s) return 0;
@@ -67,9 +67,9 @@ int vader_http_accept(void *sv) {
     s->cfd = c;
     s->method[0] = 0;
 
-    /* memória limitada: reusa UMA arena por servidor, zerando-a a cada request
-       (sem churn de malloc/free). O corpo do loop (parse + JSON + strings) aloca
-       aqui e é descartado no próximo accept. */
+    /* bounded memory: reuses ONE arena per server, resetting it on each request
+       (no malloc/free churn). The loop body (parse + JSON + strings) allocates
+       here and is discarded on the next accept. */
     if (s->req_arena)
         vader_reset(s->req_arena);
     else
@@ -136,7 +136,7 @@ const char *vader_http_body(void *sv) {
     return vader_strdup(s && s->body ? s->body : "");
 }
 
-/* valor de um cabeçalho do request (case-insensitive), ou "" se ausente. */
+/* value of a request header (case-insensitive), or "" if absent. */
 const char *vader_http_header(void *sv, const char *name) {
     HttpServer *s = sv;
     if (!s || !s->headers)
@@ -157,7 +157,7 @@ const char *vader_http_header(void *sv, const char *name) {
     return out;
 }
 
-/* envia a resposta e fecha a conexão atual. */
+/* sends the response and closes the current connection. */
 void vader_http_respond(void *sv, long status, const char *ctype, const char *body) {
     HttpServer *s = sv;
     if (!s || s->cfd < 0)
@@ -180,18 +180,18 @@ void vader_http_respond(void *sv, long status, const char *ctype, const char *bo
     h_write_all(s->cfd, (const unsigned char *)body, blen);
     close(s->cfd);
     s->cfd = -1;
-    /* não dá free() aqui: path/body/headers vivem na arena da request,
-       liberada em massa na próxima accept. */
+    /* no free() here: path/body/headers live in the request's arena,
+       freed in bulk on the next accept. */
 }
 
-/* ===================== cliente ============================================ */
+/* ===================== client ============================================ */
 static const char *http_request(const char *method, const char *url,
                                 const char *ctype, const char *body) {
     const char *p = url;
     if (strncmp(p, "http://", 7) == 0)
         p += 7;
     else if (strncmp(p, "https://", 8) == 0)
-        return vader_strdup(""); /* v1: cliente sem TLS */
+        return vader_strdup(""); /* v1: client without TLS */
     char host[256] = {0}, path[2048] = "/";
     int port = 80;
     const char *slash = strchr(p, '/');
@@ -239,7 +239,7 @@ static const char *http_request(const char *method, const char *url,
     if (body)
         h_write_all(fd, (const unsigned char *)body, blen);
 
-    /* lê a resposta inteira */
+    /* reads the entire response */
     int cap = 65536, n = 0;
     char *resp = vader_alloc(cap);
     for (;;) {

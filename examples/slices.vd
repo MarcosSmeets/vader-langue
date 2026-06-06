@@ -1,4 +1,4 @@
-// slices.vd — slices no backend LLVM: literal, índice, len, iteração.
+// slices.vd — slices in the LLVM backend: literal, index, len, iteration.
 
 fn sum(xs []int): int {
     int total = 0

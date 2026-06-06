@@ -1,8 +1,8 @@
 //! Recursive-descent parser: tokens -> AST.
 //!
-//! Fase 1 / incremento 1. Expressões usam precedence climbing. Literais de struct
-//! são desabilitados no cabeçalho de `if`/`for` (mesma solução do Go) para evitar
-//! ambiguidade com o `{` do bloco.
+//! Phase 1 / increment 1. Expressions use precedence climbing. Struct literals
+//! are disabled in the header of `if`/`for` (the same solution as Go) to avoid
+//! ambiguity with the block's `{`.
 
 use crate::ast::*;
 use crate::token::{Token, TokenKind};
@@ -170,7 +170,7 @@ impl Parser {
         ))
     }
 
-    /// `[ ident [constraint] {, ident [constraint]} ]` — vazio se não houver `[`.
+    /// `[ ident [constraint] {, ident [constraint]} ]` — empty if there is no `[`.
     fn parse_type_params(&mut self) -> PResult<Vec<TypeParam>> {
         let mut params = Vec::new();
         if self.eat(&TokenKind::LBracket) {
@@ -316,7 +316,7 @@ impl Parser {
             let fname = self.expect_ident()?;
             let ty = self.parse_type()?;
             fields.push(Param { name: fname, ty });
-            self.eat(&TokenKind::Comma); // separador opcional
+            self.eat(&TokenKind::Comma); // optional separator
         }
         self.expect(&TokenKind::RBrace)?;
         Ok(StructDef {
@@ -377,7 +377,7 @@ impl Parser {
                 name: vname,
                 fields,
             });
-            self.eat(&TokenKind::Comma); // separador opcional
+            self.eat(&TokenKind::Comma); // optional separator
         }
         self.expect(&TokenKind::RBrace)?;
         Ok(EnumDef {
@@ -395,7 +395,7 @@ impl Parser {
             return Ok(Type::Slice(Box::new(inner)));
         }
         let mut name = self.expect_ident()?;
-        // tipo qualificado: pkg.Type
+        // qualified type: pkg.Type
         if self.at(&TokenKind::Dot) && matches!(self.peek2(), TokenKind::Ident(_)) {
             self.advance(); // .
             let n2 = self.expect_ident()?;
@@ -407,7 +407,7 @@ impl Parser {
                 args.push(self.parse_type()?);
             }
             self.expect(&TokenKind::RBracket)?;
-            // map[K]V — o tipo do valor vem DEPOIS do `]`
+            // map[K]V — the value type comes AFTER the `]`
             if name == "map" {
                 args.push(self.parse_type()?);
             }
@@ -451,8 +451,8 @@ impl Parser {
             let e = self.parse_expr()?;
             return Ok(Stmt::Assert(e));
         }
-        // `Type name ...` -> declaração. Detecta tipos compostos (chan[int], []T)
-        // tentando parsear um tipo seguido de identificador (com backtracking).
+        // `Type name ...` -> declaration. Detects composite types (chan[int], []T)
+        // by trying to parse a type followed by an identifier (with backtracking).
         if self.looks_like_var_decl() {
             return self.parse_var_decl(false);
         }
@@ -466,16 +466,16 @@ impl Parser {
             });
         }
         if self.eat(&TokenKind::Arrow) {
-            // envio em canal: `chan <- value`
+            // channel send: `chan <- value`
             let value = self.parse_expr()?;
             return Ok(Stmt::Send { chan: expr, value });
         }
         Ok(Stmt::Expr(expr))
     }
 
-    /// Look-ahead com backtracking: o statement começa com `Type name`?
+    /// Look-ahead with backtracking: does the statement start with `Type name`?
     fn looks_like_var_decl(&mut self) -> bool {
-        // `_, ...` (descarte iniciando um retorno múltiplo)
+        // `_, ...` (discard starting a multiple return)
         if matches!(self.kind(), TokenKind::Ident(u) if u == "_")
             && matches!(self.peek2(), TokenKind::Comma)
         {
@@ -496,7 +496,7 @@ impl Parser {
         }
         let mut decls = Vec::new();
         loop {
-            // descarte: `_` (sem tipo) num retorno múltiplo
+            // discard: `_` (no type) in a multiple return
             let is_discard = matches!(self.kind(), TokenKind::Ident(u) if u == "_")
                 && matches!(self.peek2(), TokenKind::Comma | TokenKind::Assign);
             if is_discard {
@@ -538,7 +538,7 @@ impl Parser {
         let then_block = self.parse_block()?;
         let else_block = if self.eat(&TokenKind::Else) {
             if self.at(&TokenKind::If) {
-                // `else if` -> bloco com um único if aninhado.
+                // `else if` -> block with a single nested if.
                 let nested = self.parse_if()?;
                 Some(Block { stmts: vec![nested] })
             } else {
@@ -689,8 +689,8 @@ impl Parser {
     fn parse_postfix(&mut self) -> PResult<Expr> {
         let mut e = self.parse_primary()?;
         loop {
-            // ASI-lite: um postfix (call/índice/campo) só continua na MESMA linha;
-            // numa linha nova ele é o começo de um novo statement.
+            // ASI-lite: a postfix (call/index/field) only continues on the SAME line;
+            // on a new line it is the start of a new statement.
             if self.pos > 0 && self.tokens[self.pos].line > self.tokens[self.pos - 1].line {
                 break;
             }
@@ -710,7 +710,7 @@ impl Parser {
             } else if self.at(&TokenKind::Dot) {
                 self.advance();
                 let field = self.expect_ident()?;
-                // struct literal qualificado: pkg.Type{ ... }
+                // qualified struct literal: pkg.Type{ ... }
                 let pkg = match &e.kind {
                     ExprKind::Ident(p) => Some(p.clone()),
                     _ => None,
@@ -1039,7 +1039,7 @@ mod tests {
              fn main() { User u = User{ id: 1, name: \"x\" } }",
         );
         assert_eq!(prog.items.len(), 3);
-        // método tem receiver
+        // method has a receiver
         if let Item::Function(f) = &prog.items[1] {
             assert!(f.receiver.is_some());
             assert_eq!(f.receiver.as_ref().unwrap().ty, Type::Named("User".into()));
@@ -1050,7 +1050,7 @@ mod tests {
 
     #[test]
     fn struct_lit_disabled_in_if_condition() {
-        // `if x { ... }` deve tratar x como condição, não como `x{...}`.
+        // `if x { ... }` must treat x as a condition, not as `x{...}`.
         let prog = parse_ok("fn f() { if x { return } }");
         let f = match &prog.items[0] {
             Item::Function(f) => f,
@@ -1064,7 +1064,7 @@ mod tests {
 
     #[test]
     fn parses_basics_example() {
-        // Integração: o exemplo real precisa parsear inteiro.
+        // Integration: the real example must parse in full.
         let src = include_str!("../examples/basics.vd");
         let prog = parse(tokenize(src).unwrap()).unwrap();
         // demo, divide, User, greeting, main
@@ -1142,7 +1142,7 @@ mod tests {
 
     #[test]
     fn parses_remaining_examples() {
-        // Os outros exemplos reais precisam parsear inteiros.
+        // The other real examples must parse in full.
         parse(tokenize(include_str!("../examples/api_usecase.vd")).unwrap()).unwrap();
         parse(tokenize(include_str!("../examples/concurrency.vd")).unwrap()).unwrap();
         parse(tokenize(include_str!("../examples/repository_vs_gateway.vd")).unwrap()).unwrap();
@@ -1164,7 +1164,7 @@ mod tests {
             _ => panic!(),
         };
         assert_eq!(vis_a, Visibility::Public);
-        assert_eq!(vis_b, Visibility::Private); // padrão
+        assert_eq!(vis_b, Visibility::Private); // default
         assert_eq!(vis_s, Visibility::Private);
     }
 }

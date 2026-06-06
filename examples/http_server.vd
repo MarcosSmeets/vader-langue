@@ -1,4 +1,4 @@
-// Servidor HTTP nativo respondendo JSON — o pitch de "ótima pra API".
+// Native HTTP server responding JSON — the "great for APIs" pitch.
 import "std/http"
 import "std/json"
 
@@ -8,7 +8,7 @@ public fn main() {
         string p = http.path(s)
         Json resp = json.object()
         json.set_str(resp, "path", p)
-        json.set_str(resp, "msg", "ola da Vader")
+        json.set_str(resp, "msg", "hello from Vader")
         http.respond(s, 200, "application/json", json.encode(resp))
     }
 }

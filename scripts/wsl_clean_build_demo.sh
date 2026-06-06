@@ -12,9 +12,9 @@ rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
 echo "### vader build loja"
 "$BIN" build loja
 echo "exit=$?"
-echo "### tipo do binário gerado"
-file loja/loja 2>/dev/null || echo "(sem binário)"
-echo "### rodando ./loja/loja"
+echo "### type of generated binary"
+file loja/loja 2>/dev/null || echo "(no binary)"
+echo "### running ./loja/loja"
 ./loja/loja
 echo "### vader test loja"
 "$BIN" test loja

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instala o Go no espaço do usuário (sem sudo), em ~/.local/go.
+# Installs Go in the user space (no sudo), at ~/.local/go.
 set -eu
 
 VER=$(curl -fsSL "https://go.dev/VERSION?m=text" | head -n1)
@@ -10,7 +10,7 @@ curl -fsSL "$URL" -o /tmp/go.tar.gz
 
 rm -rf "$HOME/.local/go"
 mkdir -p "$HOME/.local"
-tar -C "$HOME/.local" -xzf /tmp/go.tar.gz   # cria ~/.local/go
+tar -C "$HOME/.local" -xzf /tmp/go.tar.gz   # creates ~/.local/go
 rm -f /tmp/go.tar.gz
 
 "$HOME/.local/go/bin/go" version

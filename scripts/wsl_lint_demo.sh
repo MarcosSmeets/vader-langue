@@ -8,16 +8,16 @@ BIN="$PWD/target/debug/vader"
 DEMO=/tmp/vader_lint_demo
 rm -rf "$DEMO"; mkdir -p "$DEMO"; cd "$DEMO" || exit 1
 
-# projeto clean
+# clean project
 "$BIN" new api loja --arch clean >/dev/null
 cd loja || exit 1
 
-echo "### 1) lint num arquivo correto (domain/user.vd)"
+echo "### 1) lint on a correct file (domain/user.vd)"
 "$BIN" lint domain/user.vd
 echo "exit: $?"
 
 echo
-echo "### 2) dev comete o erro: domain importando infra"
+echo "### 2) dev makes the mistake: domain importing infra"
 cat > domain/leak.vd <<'EOF'
 import "loja/infra/db"
 
@@ -26,4 +26,4 @@ public struct Leak {
 }
 EOF
 "$BIN" lint domain/leak.vd
-echo "exit: $?  (!= 0 => barra o build/push)"
+echo "exit: $?  (!= 0 => blocks the build/push)"

@@ -1,12 +1,12 @@
-/* Cliente MySQL/MariaDB (protocolo nativo) do runtime da Vader — self-contained.
+/* Vader runtime MySQL/MariaDB client (native protocol) — self-contained.
  *
- * TCP + handshake v10 + auth `mysql_native_password` (SHA-1) + COM_QUERY +
- * parsing do result set (texto). Sem libmysqlclient, sem TLS (v1).
+ * TCP + handshake v10 + `mysql_native_password` auth (SHA-1) + COM_QUERY +
+ * result set parsing (text). No libmysqlclient, no TLS (v1).
  *
- * MySQL 8 usa `caching_sha2_password` por padrão (não suportado no v1 sem TLS/RSA):
- * crie o usuário com `IDENTIFIED WITH mysql_native_password`.
+ * MySQL 8 uses `caching_sha2_password` by default (not supported in v1 without TLS/RSA):
+ * create the user with `IDENTIFIED WITH mysql_native_password`.
  *
- * Inclui SHA-1 próprio (domínio público). Sem-GC: buffers vazam. */
+ * Includes its own SHA-1 (public domain). No GC: buffers leak. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +15,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-/* ===================== SHA-1 (domínio público) ============================ */
+/* ===================== SHA-1 (public domain) ============================== */
 typedef struct {
     unsigned int state[5];
     unsigned long long count;
@@ -73,7 +73,7 @@ static void sha1(const unsigned char *d, size_t n, unsigned char out[20]) {
     SHA1_CTX c; sha1_init(&c); sha1_update(&c, d, n); sha1_final(&c, out);
 }
 
-/* ===================== socket + pacotes =================================== */
+/* ===================== socket + packets =================================== */
 static int my_read_n(int fd, unsigned char *buf, int n) {
     int got = 0;
     while (got < n) {
@@ -93,7 +93,7 @@ static int my_write_all(int fd, const unsigned char *buf, int n) {
     return 0;
 }
 
-/* lê um pacote MySQL: 3 bytes len (LE) + 1 byte seq. Aloca o payload. */
+/* reads a MySQL packet: 3 len bytes (LE) + 1 seq byte. Allocates the payload. */
 static unsigned char *my_read_packet(int fd, int *outlen, int *seq) {
     unsigned char hdr[4];
     if (my_read_n(fd, hdr, 4) < 0) return 0;
@@ -111,7 +111,7 @@ static int my_write_packet(int fd, const unsigned char *payload, int len, int se
     return my_write_all(fd, payload, len);
 }
 
-/* inteiro length-encoded: retorna o valor e avança *p */
+/* length-encoded integer: returns the value and advances *p */
 static unsigned long long lenenc_int(const unsigned char **p) {
     unsigned char b = *(*p)++;
     if (b < 0xfb) return b;
@@ -161,7 +161,7 @@ static void my_dsn_parse(const char *dsn, char *user, char *pass, char *host,
     if (!host[0]) strcpy(host, "127.0.0.1");
 }
 
-/* scramble do mysql_native_password: SHA1(pwd) XOR SHA1(salt + SHA1(SHA1(pwd))) */
+/* mysql_native_password scramble: SHA1(pwd) XOR SHA1(salt + SHA1(SHA1(pwd))) */
 static void native_scramble(const char *pass, const unsigned char *salt, unsigned char out[20]) {
     unsigned char h1[20], h2[20], h3[20], cat[40];
     sha1((const unsigned char *)pass, strlen(pass), h1);
@@ -191,7 +191,7 @@ MyConn *vader_my_connect(const char *dsn) {
     MyConn *c = calloc(1, sizeof(MyConn));
     c->fd = fd;
 
-    /* handshake inicial do servidor */
+    /* initial server handshake */
     int len, seq;
     unsigned char *pkt = my_read_packet(fd, &len, &seq);
     if (!pkt) { c->fd = -1; return c; }
@@ -199,7 +199,7 @@ MyConn *vader_my_connect(const char *dsn) {
        charset(1), status(2), caps_high(2), authlen(1), reserved(10), salt2 */
     int i = 1;
     while (i < len && pkt[i]) i++;
-    i++;            /* fim da versão */
+    i++;            /* end of version */
     i += 4;         /* connection id */
     unsigned char salt[20];
     memcpy(salt, pkt + i, 8); i += 8;
@@ -215,7 +215,7 @@ MyConn *vader_my_connect(const char *dsn) {
     memcpy(salt + 8, pkt + i, salt2 < 12 ? salt2 : 12);
     free(pkt);
 
-    /* resposta de handshake (protocolo 41) */
+    /* handshake response (protocol 41) */
     unsigned int caps = 0x1 | 0x200 | 0x2000 | 0x8000 | 0x80000 | 0x8; /* +CONNECT_WITH_DB */
     if (!db[0]) caps &= ~0x8u;
     unsigned char resp[512];
@@ -238,15 +238,15 @@ MyConn *vader_my_connect(const char *dsn) {
     o += sprintf((char *)resp + o, "mysql_native_password") + 1;
     my_write_packet(fd, resp, o, 1);
 
-    /* resposta do servidor: OK(0x00) / ERR(0xff) / AuthSwitch(0xfe) */
+    /* server response: OK(0x00) / ERR(0xff) / AuthSwitch(0xfe) */
     pkt = my_read_packet(fd, &len, &seq);
     if (!pkt) { c->fd = -1; return c; }
     if (pkt[0] == 0xff) {
-        snprintf(c->err, sizeof(c->err), "auth recusada (use mysql_native_password)");
+        snprintf(c->err, sizeof(c->err), "auth refused (use mysql_native_password)");
         free(pkt); c->fd = -1; return c;
     }
     if (pkt[0] == 0xfe) {
-        snprintf(c->err, sizeof(c->err), "servidor pediu troca de plugin (use mysql_native_password)");
+        snprintf(c->err, sizeof(c->err), "server requested plugin switch (use mysql_native_password)");
         free(pkt); c->fd = -1; return c;
     }
     free(pkt);
@@ -259,7 +259,7 @@ const char *vader_my_error(MyConn *c) {
 
 static MyRows *my_run(MyConn *c, const char *sql, char **errout) {
     *errout = 0;
-    if (!c || c->fd < 0) { *errout = strdup("conexão inválida"); return 0; }
+    if (!c || c->fd < 0) { *errout = strdup("invalid connection"); return 0; }
     int sqllen = strlen(sql);
     unsigned char *q = malloc(sqllen + 1);
     q[0] = 0x03; /* COM_QUERY */
@@ -272,19 +272,19 @@ static MyRows *my_run(MyConn *c, const char *sql, char **errout) {
 
     int len, seq;
     unsigned char *pkt = my_read_packet(c->fd, &len, &seq);
-    if (!pkt) { *errout = strdup("conexão caiu"); return rows; }
-    if (pkt[0] == 0xff) { *errout = strdup("erro de SQL no MySQL"); free(pkt); return rows; }
-    if (pkt[0] == 0x00) { free(pkt); return rows; } /* OK: sem result set */
+    if (!pkt) { *errout = strdup("connection dropped"); return rows; }
+    if (pkt[0] == 0xff) { *errout = strdup("SQL error in MySQL"); free(pkt); return rows; }
+    if (pkt[0] == 0x00) { free(pkt); return rows; } /* OK: no result set */
     const unsigned char *pp = pkt;
     rows->ncols = (int)lenenc_int(&pp);
     free(pkt);
 
-    /* definições de coluna + EOF */
+    /* column definitions + EOF */
     for (int i = 0; i < rows->ncols; i++) { pkt = my_read_packet(c->fd, &len, &seq); free(pkt); }
     pkt = my_read_packet(c->fd, &len, &seq); /* EOF */
     free(pkt);
 
-    /* linhas até EOF */
+    /* rows until EOF */
     int cap = 0;
     for (;;) {
         pkt = my_read_packet(c->fd, &len, &seq);

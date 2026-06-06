@@ -5,13 +5,13 @@ cd /mnt/c/Users/marco/Documents/workspace/side_projects/vader || exit 1
 cargo build --quiet
 BIN="$PWD/target/debug/vader"
 
-# limpa template anterior se existir
+# clean up previous template if it exists
 rm -rf "$HOME/.vader/templates/meu-padrao"
 
 WORK=/tmp/vader_tmpl_demo
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
 
-# 1) o dev monta a SUA estrutura preferida, com __name__ e as libs dele
+# 1) the dev sets up THEIR preferred structure, with __name__ and their libs
 mkdir -p meu-padrao/src
 cat > meu-padrao/vader.toml <<'EOF'
 [project]
@@ -38,7 +38,7 @@ echo
 echo "### vader new --template meu-padrao cliente-x"
 "$BIN" new --template meu-padrao cliente-x
 echo
-echo "=== cliente-x/vader.toml (placeholders substituídos) ==="
+echo "=== cliente-x/vader.toml (placeholders replaced) ==="
 cat cliente-x/vader.toml
 echo "=== cliente-x/src/main.vd ==="
 cat cliente-x/src/main.vd

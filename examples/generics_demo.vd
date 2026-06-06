@@ -1,4 +1,4 @@
-// generics_demo.vd — funções genéricas monomorfizadas no backend LLVM.
+// generics_demo.vd — generic functions monomorphized in the LLVM backend.
 
 fn id[T](x T): T {
     return x
@@ -9,8 +9,8 @@ fn first[T](xs []T): T {
 }
 
 fn main() {
-    print(id(42))          // 42  (instancia id$i64)
+    print(id(42))          // 42  (instantiates id$i64)
 
     []int nums = [7, 8, 9]
-    print(first(nums))     // 7   (instancia first$i64)
+    print(first(nums))     // 7   (instantiates first$i64)
 }

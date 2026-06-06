@@ -10,7 +10,7 @@ DEMO=/tmp/vader_new_demo
 rm -rf "$DEMO"; mkdir -p "$DEMO"; cd "$DEMO" || exit 1
 
 "$BIN" new api loja --arch clean
-echo "=== árvore gerada ==="
+echo "=== generated tree ==="
 find loja -type f | sort
 echo "=== loja/usecase/create_user.vd ==="
 cat loja/usecase/create_user.vd

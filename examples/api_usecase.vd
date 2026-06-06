@@ -1,19 +1,19 @@
-// api_usecase.vd — uma fatia de uma API em Clean Architecture.
-// Isto é o tipo de arquivo que `vader gen usecase CreateUser` produziria.
+// api_usecase.vd — a slice of an API in Clean Architecture.
+// This is the kind of file that `vader gen usecase CreateUser` would produce.
 
-// --- domain (regras puras, sem dependência de infra) ---
+// --- domain (pure rules, no infra dependency) ---
 struct User {
     id   int
     name string
 }
 
-// Porta (interface) que a infra implementa. O `domain`/`usecase` só conhece
-// esta abstração — o compilador IMPEDE importar `infra` aqui.
+// Port (interface) that the infra implements. The `domain`/`usecase` only knows
+// this abstraction — the compiler PREVENTS importing `infra` here.
 interface UserRepository {
     fn save(user User): (User, error)
 }
 
-// --- usecase (orquestra a regra de negócio) ---
+// --- usecase (orchestrates the business rule) ---
 struct CreateUser {
     repo UserRepository
 }

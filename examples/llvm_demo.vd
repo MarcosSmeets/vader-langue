@@ -1,4 +1,4 @@
-// llvm_demo.vd — subset que o backend LLVM (Fase 3, v1) compila pra binário nativo.
+// llvm_demo.vd — subset that the LLVM backend (Phase 3, v1) compiles to a native binary.
 
 fn add(a, b int): int {
     return a + b
@@ -20,7 +20,7 @@ fn sum_to(n int): int {
 }
 
 fn main() {
-    print("LLVM backend vivo!")
+    print("LLVM backend alive!")
     print(add(2, 3))
     print(fib(10))
     print(sum_to(100))

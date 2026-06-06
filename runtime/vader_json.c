@@ -1,10 +1,10 @@
-/* JSON do runtime da Vader: árvore de valor + parse + encode + acessores/builders.
- * Self-contained. Sem-GC: tudo vaza, alinhado com o runtime. */
+/* Vader runtime JSON: value tree + parse + encode + accessors/builders.
+ * Self-contained. No GC: everything leaks, in line with the runtime. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* alocador de arena (vader_mem.c) — JSON é tipicamente scratch por request/job */
+/* arena allocator (vader_mem.c) — JSON is typically scratch per request/job */
 extern void *vader_alloc(long n);
 extern void *vader_realloc(void *old, long oldn, long newn);
 extern char *vader_strdup(const char *s);
@@ -17,8 +17,8 @@ typedef struct JVal {
     double d;
     int b;
     char *s;
-    struct JVal **items; /* arr: elementos; obj: valores (paralelo a keys) */
-    char **keys;         /* só obj */
+    struct JVal **items; /* arr: elements; obj: values (parallel to keys) */
+    char **keys;         /* obj only */
     int count, cap;
 } JVal;
 
@@ -47,7 +47,7 @@ static void jskip(const char **p) {
 }
 
 static char *jparse_str(const char **p) {
-    (*p)++; /* aspas de abertura */
+    (*p)++; /* opening quote */
     int cap = 16, n = 0;
     char *out = vader_alloc(cap);
     while (**p && **p != '"') {
@@ -148,11 +148,11 @@ static JVal *jparse_val(const char **p) {
     if (c == 't') { *p += 4; JVal *v = jnew(J_BOOL); v->b = 1; return v; }
     if (c == 'f') { *p += 5; JVal *v = jnew(J_BOOL); v->b = 0; return v; }
     if (c == 'n') { *p += 4; return &JNULL; }
-    /* número */
+    /* number */
     char *end;
     double d = strtod(*p, &end);
     JVal *v;
-    /* inteiro se não tem . nem e/E no trecho consumido */
+    /* integer if there's no . nor e/E in the consumed span */
     int isint = 1;
     for (const char *q = *p; q < end; q++)
         if (*q == '.' || *q == 'e' || *q == 'E') { isint = 0; break; }
@@ -167,7 +167,7 @@ void *vader_json_parse(const char *s) {
     return jparse_val(&p);
 }
 
-/* ===================== acessores ========================================= */
+/* ===================== accessors ========================================= */
 void *vader_json_field(void *jv, const char *key) {
     JVal *v = jv;
     if (!v || v->type != J_OBJ) return &JNULL;

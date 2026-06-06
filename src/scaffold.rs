@@ -1,10 +1,10 @@
-//! Scaffolder do `vader new`: gera a árvore de um projeto numa das arquiteturas
-//! opinativas (clean/hexagonal/mvc/minimal), já em formato TDD.
+//! Scaffolder for `vader new`: generates a project tree in one of the opinionated
+//! architectures (clean/hexagonal/mvc/minimal), already in TDD format.
 //!
-//! Cada função de arquitetura devolve uma lista de `(caminho relativo, conteúdo)`.
-//! `create` escreve os arquivos em disco sob `<name>/`.
+//! Each architecture function returns a list of `(relative path, content)`.
+//! `create` writes the files to disk under `<name>/`.
 
-/// Arquitetura padrão para cada tipo de projeto.
+/// Default architecture for each project kind.
 pub fn default_arch(kind: &str) -> &'static str {
     match kind {
         "api" | "worker" => "clean",
@@ -12,13 +12,13 @@ pub fn default_arch(kind: &str) -> &'static str {
     }
 }
 
-/// Monta a lista de arquivos (caminho relativo à raiz do projeto, conteúdo).
+/// Builds the list of files (path relative to the project root, content).
 pub fn files_for(kind: &str, arch: &str, name: &str) -> Result<Vec<(String, String)>, String> {
     let mut files = vec![(
         "vader.toml".to_string(),
         format!(
             "[project]\nname         = \"{name}\"\nversion      = \"0.1.0\"\nkind         = \"{kind}\"\narchitecture = \"{arch}\"\n\n\
-             [test]\n# bloqueia `git push` se a cobertura ficar abaixo do mínimo\ncoverage_gate = true\nmin_coverage  = 80\n",
+             [test]\n# blocks `git push` if coverage falls below the minimum\ncoverage_gate = true\nmin_coverage  = 80\n",
         ),
     )];
     let body = match arch {
@@ -30,7 +30,7 @@ pub fn files_for(kind: &str, arch: &str, name: &str) -> Result<Vec<(String, Stri
     };
     files.extend(body);
 
-    // Projetos executáveis já nascem prontos pra Docker (binário estático -> imagem mínima).
+    // Executable projects are born Docker-ready (static binary -> minimal image).
     if kind != "lib" {
         files.push(("Dockerfile".to_string(), dockerfile(name)));
         files.push((".dockerignore".to_string(), ".git\n/target\n".to_string()));
@@ -41,19 +41,19 @@ pub fn files_for(kind: &str, arch: &str, name: &str) -> Result<Vec<(String, Stri
 fn dockerfile(name: &str) -> String {
     format!(
         "# syntax=docker/dockerfile:1\n\n\
-         # --- build (requer o toolchain Vader; troque pela imagem oficial quando existir) ---\n\
+         # --- build (requires the Vader toolchain; swap for the official image once it exists) ---\n\
          FROM vader/toolchain:latest AS build\n\
          WORKDIR /src\n\
          COPY . .\n\
          RUN vader build .\n\n\
-         # --- runtime: imagem mínima, o binário Vader é estático ---\n\
+         # --- runtime: minimal image, the Vader binary is static ---\n\
          FROM scratch\n\
          COPY --from=build /src/{name}/{name} /app\n\
          ENTRYPOINT [\"/app\"]\n",
     )
 }
 
-/// Cria o projeto em disco sob `<name>/`. Falha se o diretório já existir.
+/// Creates the project on disk under `<name>/`. Fails if the directory already exists.
 pub fn create(kind: &str, arch: &str, name: &str) -> Result<Vec<String>, String> {
     let files = files_for(kind, arch, name)?;
     let root = std::path::Path::new(name);
@@ -82,7 +82,7 @@ fn clean(name: &str) -> Vec<(String, String)> {
             "cmd/main.vd",
             format!(
                 "import \"{name}/domain\"\nimport \"{name}/usecase\"\nimport \"{name}/infra/db\"\n\n\
-                 // composition root: liga as implementações concretas às portas.\n\
+                 // composition root: wires the concrete implementations to the ports.\n\
                  public fn main() {{\n    \
                      db.UserRepositoryPg repo = db.UserRepositoryPg{{}}\n    \
                      usecase.CreateUser createUser = usecase.CreateUser{{ repo: repo }}\n    \
@@ -94,13 +94,13 @@ fn clean(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "domain/user.vd",
-            "// domain/user.vd — entidade pura (sem dependência de infra).\n\n\
+            "// domain/user.vd — pure entity (no infra dependency).\n\n\
              public struct User {\n    id   int\n    name string\n}\n"
                 .to_string(),
         ),
         f(
             "domain/user_test.vd",
-            "// auto-gerado: teste espelho da entidade.\n\n\
+            "// auto-generated: mirror test for the entity.\n\n\
              test \"user holds its fields\" {\n    \
                  User u = User{ id: 1, name: \"Ada\" }\n    \
                  assert u.id == 1\n    \
@@ -110,7 +110,7 @@ fn clean(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "domain/user_repository.vd",
-            "// porta de persistência — o domain só conhece a abstração.\n\n\
+            "// persistence port — the domain only knows the abstraction.\n\n\
              public interface UserRepository {\n    \
                  fn save(user User): (User, error)\n    \
                  fn findById(id int): (User, error)\n\
@@ -131,7 +131,7 @@ fn clean(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "usecase/create_user_test.vd",
-            "// auto-gerado: teste do caso de uso.\n\n\
+            "// auto-generated: use case test.\n\n\
              test \"execute rejects an empty name\" {\n    \
                  CreateUser uc = CreateUser{ repo: nil }\n    \
                  _, error err = uc.execute(\"\")\n    \
@@ -156,10 +156,10 @@ fn clean(name: &str) -> Vec<(String, String)> {
             "infra/db/user_repository_pg.vd",
             format!(
                 "import \"std/db\"\nimport \"{name}/domain\"\n\n\
-                 // implementação concreta da porta domain.UserRepository (Postgres).\n\
+                 // concrete implementation of the domain.UserRepository port (Postgres).\n\
                  public struct UserRepositoryPg {{\n    conn db.Conn\n}}\n\n\
                  public fn (r UserRepositoryPg) save(user domain.User): (domain.User, error) {{\n    \
-                     // INSERT ... ; o mapping linha->entidade fica aqui, no boundary.\n    \
+                     // INSERT ... ; the row->entity mapping lives here, at the boundary.\n    \
                      return user, nil\n\
                  }}\n\n\
                  public fn (r UserRepositoryPg) findById(id int): (domain.User, error) {{\n    \
@@ -199,19 +199,19 @@ fn hexagonal(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "core/port/inbound/register_user.vd",
-            "// porta de entrada (driving) — o que o mundo pode pedir ao core.\n\n\
+            "// inbound port (driving) — what the world can ask of the core.\n\n\
              public interface RegisterUserPort {\n    fn execute(name string): (User, error)\n}\n"
                 .to_string(),
         ),
         f(
             "core/port/outbound/user_repository.vd",
-            "// porta de saída (driven) — o que o core precisa do mundo.\n\n\
+            "// outbound port (driven) — what the core needs from the world.\n\n\
              public interface UserRepository {\n    fn save(user User): (User, error)\n}\n"
                 .to_string(),
         ),
         f(
             "core/service/register_user_service.vd",
-            "// implementa a porta inbound, usando apenas a porta outbound.\n\n\
+            "// implements the inbound port, using only the outbound port.\n\n\
              public struct RegisterUser {\n    repo UserRepository\n}\n\n\
              public fn (s RegisterUser) execute(name string): (User, error) {\n    \
                  if name == \"\" { return User{}, error(\"name is required\") }\n    \
@@ -221,13 +221,13 @@ fn hexagonal(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "adapter/inbound/http/user_handler.vd",
-            "// driving adapter: traduz HTTP para a porta inbound.\n\n\
+            "// driving adapter: translates HTTP into the inbound port.\n\n\
              public struct UserHandler {\n    register RegisterUserPort\n}\n"
                 .to_string(),
         ),
         f(
             "adapter/outbound/db/user_repository_pg.vd",
-            "// driven adapter: implementa a porta outbound.\n\n\
+            "// driven adapter: implements the outbound port.\n\n\
              public struct UserRepositoryPg {\n    // conn ...\n}\n\n\
              public fn (r UserRepositoryPg) save(user User): (User, error) {\n    return user, nil\n}\n"
                 .to_string(),
@@ -248,7 +248,7 @@ fn mvc(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "model/user.vd",
-            "// model: dados + regra de negócio.\n\n\
+            "// model: data + business rule.\n\n\
              public struct User {\n    id   int\n    name string\n}\n\n\
              public fn (u User) isValid(): bool {\n    return u.name != \"\"\n}\n"
                 .to_string(),
@@ -263,13 +263,13 @@ fn mvc(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "view/user_view.vd",
-            "// view: apresentação / serialização de saída.\n\n\
+            "// view: presentation / output serialization.\n\n\
              public fn renderUser(u User): string {\n    return \"User: \" + u.name\n}\n"
                 .to_string(),
         ),
         f(
             "controller/user_controller.vd",
-            "// controller: orquestra request -> model -> view.\n\n\
+            "// controller: orchestrates request -> model -> view.\n\n\
              public struct UserController {}\n\n\
              public fn (c UserController) create(name string): string {\n    \
                  User u = User{ name: name }\n    \
@@ -304,7 +304,7 @@ fn minimal(name: &str) -> Vec<(String, String)> {
         ),
         f(
             "src/greet_test.vd",
-            "// auto-gerado: teste espelho da função.\n\n\
+            "// auto-generated: mirror test for the function.\n\n\
              test \"greet builds a greeting\" {\n    assert greet(\"World\") == \"Hello, World\"\n}\n"
                 .to_string(),
         ),
@@ -339,7 +339,7 @@ mod tests {
             assert!(p.iter().any(|x| x == "vader.toml"), "{arch} missing toml");
             assert!(
                 p.iter().any(|x| x.ends_with("_test.vd")),
-                "{arch} missing a test (TDD por padrão)"
+                "{arch} missing a test (TDD by default)"
             );
             assert!(p.iter().any(|x| x.ends_with("main.vd")), "{arch} missing main");
         }
@@ -349,7 +349,7 @@ mod tests {
     fn executable_kinds_get_a_dockerfile() {
         assert!(paths("api", "clean", "demo").iter().any(|p| p == "Dockerfile"));
         assert!(paths("cli", "minimal", "demo").iter().any(|p| p == "Dockerfile"));
-        // lib não é executável -> sem Dockerfile
+        // lib is not executable -> no Dockerfile
         assert!(!paths("lib", "minimal", "demo").iter().any(|p| p == "Dockerfile"));
     }
 

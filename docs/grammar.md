@@ -1,23 +1,23 @@
-# Vader — Gramática e Sintaxe
+# Vader — Grammar and Syntax
 
-> Status: `draft` — decisões marcadas como **(proposta)** estão abertas pra mudar.
-> Keywords em **inglês**. Estilo Go: sem `;`, sem parênteses em `if`/`for`.
-> Veja exemplos concretos em [`../examples/`](../examples/).
+> Status: `draft` — decisions marked **(proposal)** are open to change.
+> Keywords in **English**. Go style: no `;`, no parentheses in `if`/`for`.
+> See concrete examples in [`../examples/`](../examples/).
 
 ---
 
-## 1. Comentários
+## 1. Comments
 
 ```vader
-// comentário de linha
-/* comentário
-   de bloco */
+// line comment
+/* block
+   comment */
 ```
 
-## 2. Variáveis
+## 2. Variables
 
-**Tipagem forte e explícita, sempre.** Sem `let`/`var`/`mut` — o tipo vem na frente,
-estilo C. Não há inferência de tipo na declaração.
+**Strong, explicit typing, always.** No `let`/`var`/`mut` — the type comes first,
+C-style. There is no type inference on declaration.
 
 ```vader
 int    count = 0
@@ -25,49 +25,49 @@ string name  = "Vader"
 bool   active = true
 float  ratio = 1.5
 
-count = count + 1       // reatribuição não repete o tipo
+count = count + 1       // reassignment does not repeat the type
 ```
 
-Constantes usam `const`:
+Constants use `const`:
 
 ```vader
 const int MAX_RETRIES = 3
 ```
 
-Em retorno múltiplo, cada variável leva seu tipo; use `_` pra descartar:
+In multiple return, each variable carries its type; use `_` to discard:
 
 ```vader
 int result, error err = divide(10, 2)
 _, error e2 = divide(10, 0)
 ```
 
-## 3. Tipos
+## 3. Types
 
-| Categoria | Tipos |
+| Category | Types |
 |---|---|
-| Primitivos | `int`, `float`, `bool`, `string` |
-| Compostos  | `struct`, `[]T` (slice), `map[K]V`, `chan[T]` |
-| Especiais  | `error`, `nil` |
+| Primitives | `int`, `float`, `bool`, `string` |
+| Composite  | `struct`, `[]T` (slice), `map[K]V`, `chan[T]` |
+| Special    | `error`, `nil` |
 
-## 4. Funções
+## 4. Functions
 
-Tipo de retorno vem **depois de `:`**. Parâmetros consecutivos do mesmo tipo podem ser
-**agrupados** (`a, b int`). Sem `:` = não retorna nada.
+The return type comes **after `:`**. Consecutive parameters of the same type can be
+**grouped** (`a, b int`). No `:` = returns nothing.
 
-**Visibilidade:** `public` ou `private` antes da declaração (vale para `fn` e `struct`,
-e futuramente `enum`/`interface`/`const`). Sem modificador, o padrão é **`private`**.
+**Visibility:** `public` or `private` before the declaration (applies to `fn` and `struct`,
+and later `enum`/`interface`/`const`). With no modifier, the default is **`private`**.
 
 ```vader
-public fn api(): int { return 1 }   // exportada do pacote
-private fn helper() { }             // só dentro do pacote (= o padrão)
+public fn api(): int { return 1 }   // exported from the package
+private fn helper() { }             // only inside the package (= the default)
 ```
 
 ```vader
-fn add(a, b int): int {           // a e b são int; retorna int
+fn add(a, b int): int {           // a and b are int; returns int
     return a + b
 }
 
-// Múltiplos retornos (idiomático pra erro):
+// Multiple returns (idiomatic for errors):
 fn divide(a, b int): (int, error) {
     if b == 0 {
         return 0, error("division by zero")
@@ -75,10 +75,10 @@ fn divide(a, b int): (int, error) {
     return a / b, nil
 }
 
-fn main() { }                     // sem retorno
+fn main() { }                     // no return
 ```
 
-## 5. Structs, métodos e interfaces
+## 5. Structs, methods, and interfaces
 
 ```vader
 struct User {
@@ -86,7 +86,7 @@ struct User {
     name string
 }
 
-// Método: receiver entre `fn` e o nome.
+// Method: receiver between `fn` and the name.
 fn (u User) greeting(): string {
     return "Hi, " + u.name
 }
@@ -96,7 +96,7 @@ interface UserRepository {
 }
 ```
 
-## 6. Controle de fluxo
+## 6. Control flow
 
 ```vader
 if x > 0 {
@@ -108,21 +108,21 @@ if x > 0 {
 }
 ```
 
-**Só existe `for`** — igual Go, um único laço cobre todos os casos (não há
-`while`/`do-while`/`foreach` separados):
+**Only `for` exists** — like Go, a single loop covers all cases (there is no
+separate `while`/`do-while`/`foreach`):
 
 ```vader
-for i in 0..10  { ... }   // range exclusivo  → 0,1,...,9
-for i in 0..=10 { ... }   // range inclusivo  → 0,1,...,10
-for item in list { ... }  // iteração sobre coleção
-for x > 0 { ... }         // condicional (papel do "while")
-for { ... }               // laço infinito
+for i in 0..10  { ... }   // exclusive range  → 0,1,...,9
+for i in 0..=10 { ... }   // inclusive range  → 0,1,...,10
+for item in list { ... }  // iteration over a collection
+for x > 0 { ... }         // conditional (the "while" role)
+for { ... }               // infinite loop
 ```
 
 ## 7. Pattern matching (`match`)
 
-`match` casa um valor contra padrões: literais, listas de valores, guardas (`if`) e o
-curinga `_`. Pode ser usado como **expressão** (retorna valor).
+`match` matches a value against patterns: literals, value lists, guards (`if`), and the
+`_` wildcard. It can be used as an **expression** (returns a value).
 
 ```vader
 string label = match status {
@@ -133,22 +133,22 @@ string label = match status {
 }
 ```
 
-> Companheiro natural de tipos-soma (`enum`/union) — ver decisões abertas.
+> Natural companion of sum types (`enum`/union) — see open decisions.
 
-## 8. Módulos e imports
+## 8. Modules and imports
 
-Um **pacote** é uma pasta de arquivos `.vd` no mesmo namespace. Um **módulo** é o projeto,
-com nome declarado no `vader.toml`. Importa-se por caminho; a stdlib mora em `std/`.
-Usa-se o símbolo qualificado pelo pacote (`fmt.println(...)`).
+A **package** is a folder of `.vd` files in the same namespace. A **module** is the project,
+with its name declared in `vader.toml`. You import by path; the stdlib lives under `std/`.
+You use the package-qualified symbol (`fmt.println(...)`).
 
 ```vader
 import "std/fmt"
 
-// agrupado:
+// grouped:
 import (
     "std/fmt"
-    "std/db/postgres"     // driver embutido — sem instalar lib externa
-    "myapp/domain"        // pacote do próprio projeto
+    "std/db/postgres"     // built-in driver — no external lib to install
+    "myapp/domain"        // the project's own package
 )
 
 fn main() {
@@ -156,9 +156,9 @@ fn main() {
 }
 ```
 
-## 9. Erros
+## 9. Errors
 
-Explícitos, como valor de retorno. Sem exceptions.
+Explicit, as a return value. No exceptions.
 
 ```vader
 int result, error err = divide(10, 2)
@@ -167,19 +167,19 @@ if err != nil {
 }
 ```
 
-## 10. Concorrência **(proposta)**
+## 10. Concurrency **(proposal)**
 
 ```vader
-chan[int] jobs = chan[int](100)   // cria canal com buffer
-spawn worker(jobs)                // dispara execução concorrente (leve)
-jobs <- 42                        // envia
-int v = <-jobs                    // recebe
+chan[int] jobs = chan[int](100)   // creates a buffered channel
+spawn worker(jobs)                // launches concurrent (lightweight) execution
+jobs <- 42                        // send
+int v = <-jobs                    // receive
 close(jobs)
 ```
 
-## 11. Testes (cidadão de primeira classe)
+## 11. Tests (first-class citizen)
 
-Bloco `test` nativo. Arquivos `*_test.vd` são gerados automaticamente como espelho.
+Native `test` block. `*_test.vd` files are generated automatically as a mirror.
 
 ```vader
 test "add returns the sum" {
@@ -188,9 +188,9 @@ test "add returns the sum" {
 }
 ```
 
-## 12. Genéricos
+## 12. Generics
 
-Tipos e funções podem ser parametrizados com `[T]`. Restrições (constraints) por interface.
+Types and functions can be parameterized with `[T]`. Constraints via interface.
 
 ```vader
 struct List[T] {
@@ -205,23 +205,23 @@ fn map[T, U](xs []T, f fn(T): U): []U {
     return out
 }
 
-// constraint: T precisa satisfazer a interface Ordered
+// constraint: T must satisfy the Ordered interface
 fn max[T Ordered](a, b T): T {
     if a > b { return a }
     return b
 }
 
-// a porta Repository deixa de repetir código por tipo:
+// the Repository port stops repeating code per type:
 interface Repository[T] {
     fn save(item T): (T, error)
     fn findById(id int): (T, error)
 }
 ```
 
-## 13. Tipos-soma (`enum`)
+## 13. Sum types (`enum`)
 
-`enum` modela um valor que é "um entre vários", opcionalmente carregando dados. O `match`
-sobre um enum é **exaustivo**: o compilador obriga tratar todos os casos (ou usar `_`).
+`enum` models a value that is "one of several", optionally carrying data. A `match`
+over an enum is **exhaustive**: the compiler forces you to handle every case (or use `_`).
 
 ```vader
 enum Shape {
@@ -235,26 +235,26 @@ fn area(s Shape): float {
         Circle(r):       3.14159 * r * r
         Rectangle(w, h): w * h
         Point:           0.0
-        // se faltar um caso e não houver `_`, é ERRO de compilação
+        // if a case is missing and there is no `_`, it's a compile ERROR
     }
 }
 ```
 
-> Com genéricos, dá pra modelar `Option[T]` e `Result[T]` na própria linguagem.
+> With generics, you can model `Option[T]` and `Result[T]` in the language itself.
 
-## 14. Esboço de gramática (EBNF simplificado)
+## 14. Grammar sketch (simplified EBNF)
 
 ```ebnf
 program    = { import } { declaration } ;
 import     = "import" ( string | "(" { string } ")" ) ;
 declaration= [ visibility ] ( funcDecl | structDecl | interfaceDecl | enumDecl ) | testDecl ;
-visibility = "public" | "private" ;                            // padrão: private
+visibility = "public" | "private" ;                            // default: private
 typeParams = "[" ident [ type ] { "," ident [ type ] } "]" ;   // [T], [T Ordered]
 
 funcDecl   = "fn" [ receiver ] ident [ typeParams ] "(" [ params ] ")" [ ":" retType ] block ;
 receiver   = "(" ident type ")" ;
 params     = paramGroup { "," paramGroup } ;
-paramGroup = ident { "," ident } type ;            // tipos agrupados: a, b int
+paramGroup = ident { "," ident } type ;            // grouped types: a, b int
 retType    = type | "(" type { "," type } ")" ;
 
 structDecl = "struct" ident [ typeParams ] "{" { ident type } "}" ;
@@ -269,32 +269,32 @@ statement  = varDecl | assign | ifStmt | forStmt
 varDecl    = [ "const" ] type ident { "," type ident } "=" expr { "," expr } ;
 assign     = ident "=" expr ;
 ifStmt     = "if" expr block [ "else" ( ifStmt | block ) ] ;
-forStmt    = "for" [ ident "in" expr | expr ] block ;   // único laço da linguagem
+forStmt    = "for" [ ident "in" expr | expr ] block ;   // the language's only loop
 returnStmt = "return" [ expr { "," expr } ] ;
 matchExpr  = "match" expr "{" { matchArm } "}" ;
 matchArm   = pattern [ "if" expr ] ":" ( expr | block ) ;
 pattern    = literal { "," literal } | ident | "_" ;
-range      = expr ( ".." | "..=" ) expr ;               // exclusivo | inclusivo
+range      = expr ( ".." | "..=" ) expr ;               // exclusive | inclusive
 ```
 
-> Gramática completa e sem ambiguidade será derivada disto na Fase 1, junto com o parser.
+> The complete, unambiguous grammar will be derived from this in Phase 1, along with the parser.
 
-## 15. Decisões de sintaxe ainda abertas
+## 15. Syntax decisions still open
 
-Nenhuma decisão estrutural pendente para a v1. Pontos finos a detalhar junto com o parser
-(Fase 1): literais de slice/map, visibilidade/export de símbolos entre pacotes,
-detalhes do modelo de concorrência.
+No structural decision pending for v1. Fine points to detail along with the parser
+(Phase 1): slice/map literals, symbol visibility/export across packages,
+concurrency model details.
 
-## Decisões já fechadas
+## Decisions already settled
 
-- **Tipagem forte e explícita**, declaração estilo C (`int x = 0`). Sem `let`/`var`/`mut`; sem inferência na declaração.
-- **Só `for`** como laço (sem `while`/`do`).
-- **Funções:** retorno depois de `:` (`fn f(): int`), parâmetros agrupáveis (`a, b int`). Múltiplo retorno explícito estilo tupla (`(int, error)`).
-- **Canais:** `chan[int]`; criação `chan[int](buffer)`.
-- **Range:** `0..10` exclusivo **e** `0..=10` inclusivo.
-- **`match`** (pattern matching) na v1, **exaustivo** sobre `enum`.
-- **Genéricos** (`[T]`, constraints por interface) na v1.
-- **`enum`/tipos-soma** na v1.
-- **Módulos/imports:** pacote por pasta, import por caminho, stdlib em `std/`.
-- **Visibilidade:** `public`/`private` antes da declaração; padrão **`private`**.
-- Keywords em inglês.
+- **Strong, explicit typing**, C-style declaration (`int x = 0`). No `let`/`var`/`mut`; no inference on declaration.
+- **Only `for`** as a loop (no `while`/`do`).
+- **Functions:** return after `:` (`fn f(): int`), groupable parameters (`a, b int`). Explicit multiple return, tuple-style (`(int, error)`).
+- **Channels:** `chan[int]`; creation `chan[int](buffer)`.
+- **Range:** `0..10` exclusive **and** `0..=10` inclusive.
+- **`match`** (pattern matching) in v1, **exhaustive** over `enum`.
+- **Generics** (`[T]`, interface constraints) in v1.
+- **`enum`/sum types** in v1.
+- **Modules/imports:** package per folder, import by path, stdlib under `std/`.
+- **Visibility:** `public`/`private` before the declaration; default **`private`**.
+- Keywords in English.

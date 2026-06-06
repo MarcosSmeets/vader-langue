@@ -1,8 +1,8 @@
-// repository_vs_gateway.vd — a distinção que a Vader fiscaliza.
+// repository_vs_gateway.vd — the distinction that Vader enforces.
 //
-// Repository e Gateway são PORTAS no domain. As implementações vivem na infra
-// e devolvem dado já consistente (entidade de domínio). O use_case não sabe
-// se o dado veio do banco ou de uma API externa.
+// Repository and Gateway are PORTS in the domain. The implementations live in infra
+// and return already-consistent data (a domain entity). The use_case doesn't know
+// whether the data came from the database or from an external API.
 
 struct User {
     id      int
@@ -10,19 +10,19 @@ struct User {
     address string
 }
 
-// PORTA de persistência (seus dados, banco). Vive em domain/.
+// Persistence PORT (your data, database). Lives in domain/.
 interface UserRepository {
     fn save(user User): (User, error)
     fn findById(id int): (User, error)
 }
 
-// PORTA de serviço externo (API de terceiro). Vive em domain/.
+// External service PORT (third-party API). Lives in domain/.
 interface AddressGateway {
     fn fetchByZip(zip string): (string, error)
 }
 
-// USE_CASE: orquestra via portas. NÃO chama http/sql direto.
-// Se ele fizesse I/O direto aqui, a Vader daria ERRO (regra R2).
+// USE_CASE: orchestrates via ports. Does NOT call http/sql directly.
+// If it did direct I/O here, Vader would raise an ERROR (rule R2).
 struct RegisterUser {
     repo    UserRepository
     address AddressGateway
@@ -33,12 +33,12 @@ fn (uc RegisterUser) execute(name, zip string): (User, error) {
         return User{}, error("name is required")
     }
 
-    // dado externo, já consistente, vindo do gateway:
+    // external data, already consistent, coming from the gateway:
     string addr, error err = uc.address.fetchByZip(zip)
     if err != nil {
         return User{}, err
     }
 
     User user = User{ name: name, address: addr }
-    return uc.repo.save(user)   // persistência via repository
+    return uc.repo.save(user)   // persistence via repository
 }

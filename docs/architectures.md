@@ -1,130 +1,130 @@
-# Vader — Catálogo de Arquiteturas
+# Vader — Architecture Catalog
 
-> A Vader gera e **fiscaliza** múltiplas arquiteturas. Cada uma = **template** (árvore de
-> pastas + arquivos-semente) + **ruleset** (regras que o linter aplica).
-> O projeto declara a sua em `vader.toml`; o linter aplica o ruleset correspondente.
-> Status: `draft v0.1`. Conceitos de governança compartilhados: [`architecture-rules.md`](./architecture-rules.md).
+> Vader generates and **enforces** multiple architectures. Each one = **template** (folder tree
+> + seed files) + **ruleset** (rules the linter applies).
+> The project declares its own in `vader.toml`; the linter applies the matching ruleset.
+> Status: `draft v0.1`. Shared governance concepts: [`architecture-rules.md`](./architecture-rules.md).
 
 ---
 
-## Dois eixos independentes
+## Two independent axes
 
-| Eixo | Valores | O que muda |
+| Axis | Values | What changes |
 |---|---|---|
-| **Kind** | `api`, `worker`, `cli`, `lib` | só o entrypoint (servidor HTTP, loop de worker, `main`) |
-| **Architecture** | `clean`, `hexagonal`, `mvc`, `minimal` | estrutura de pastas + ruleset fiscalizado |
+| **Kind** | `api`, `worker`, `cli`, `lib` | only the entrypoint (HTTP server, worker loop, `main`) |
+| **Architecture** | `clean`, `hexagonal`, `mvc`, `minimal` | folder structure + enforced ruleset |
 
 ```sh
-vader new api minha-api --arch hexagonal
+vader new api my-api --arch hexagonal
 ```
 
-Padrões por kind: `api` → `clean` · `worker` → `clean` · `cli` → `minimal` · `lib` → `minimal`.
+Defaults by kind: `api` → `clean` · `worker` → `clean` · `cli` → `minimal` · `lib` → `minimal`.
 
 ```toml
 # vader.toml
 [project]
-name         = "minha-api"
+name         = "my-api"
 kind         = "api"
-architecture = "clean"   # define qual ruleset o linter aplica
+architecture = "clean"   # defines which ruleset the linter applies
 ```
 
-Severidade: 🔴 erro (barra o build) · 🟡 warning. Detalhe em `architecture-rules.md`.
+Severity: 🔴 error (blocks the build) · 🟡 warning. Detail in `architecture-rules.md`.
 
 ---
 
 ## 1. Clean Architecture  (`--arch clean`)
 
-Dependência aponta pra dentro; `domain` puro. Detalhada em
+Dependencies point inward; `domain` is pure. Detailed in
 [`architecture-rules.md`](./architecture-rules.md).
 
 ```
 domain/ ◀── usecase/ ◀── adapter/ ◀── infra/
 ```
 
-Resumo do ruleset: R1 import pra dentro (🔴) · R2 use_case sem I/O direto (🔴) ·
-R3 domain sem I/O (🔴) · R5 use_case em domain/ (🟡) · R6 repo/gateway com regra de negócio (🟡).
+Ruleset summary: R1 inward import (🔴) · R2 use_case with no direct I/O (🔴) ·
+R3 domain with no I/O (🔴) · R5 use_case in domain/ (🟡) · R6 repo/gateway with a business rule (🟡).
 
 ---
 
 ## 2. Hexagonal — Ports & Adapters  (`--arch hexagonal`)
 
-O "hexágono" (core) no centro; o mundo entra por **driving adapters** (entrada) e sai por
-**driven adapters** (saída). Tudo passa por **portas**.
+The "hexagon" (core) in the center; the world comes in through **driving adapters** (input) and goes out through
+**driven adapters** (output). Everything goes through **ports**.
 
 ```
-meu-api/
+my-api/
 ├── vader.toml
 ├── cmd/
 │   └── main.vd                       # composition root
-├── core/                             # o hexágono — puro, sem I/O
-│   ├── domain/                       # entidades, value objects
+├── core/                             # the hexagon — pure, no I/O
+│   ├── domain/                       # entities, value objects
 │   │   ├── user.vd
 │   │   └── user_test.vd
 │   ├── port/
-│   │   ├── inbound/                  # portas de entrada (casos de uso expostos)
+│   │   ├── inbound/                  # inbound ports (exposed use cases)
 │   │   │   └── register_user.vd
-│   │   └── outbound/                 # portas de saída (repo, gateway)
+│   │   └── outbound/                 # outbound ports (repo, gateway)
 │   │       ├── user_repository.vd
 │   │       └── address_gateway.vd
-│   └── service/                      # implementa portas inbound (regra de negócio)
+│   └── service/                      # implements inbound ports (business rule)
 │       └── register_user_service.vd
 └── adapter/
-    ├── inbound/                      # driving: http, cli, consumer de fila
+    ├── inbound/                      # driving: http, cli, queue consumer
     │   └── http/user_handler.vd
-    └── outbound/                     # driven: db, api externa
+    └── outbound/                     # driven: db, external api
         ├── db/user_repository_pg.vd
         └── http/address_gateway_http.vd
 ```
 
 **Ruleset:**
-| # | Regra | Sev |
+| # | Rule | Sev |
 |---|---|---|
-| H1 | `core` importa `adapter` | 🔴 erro |
-| H2 | `core/domain` faz I/O ou importa pacote de I/O | 🔴 erro |
-| H3 | `service` usa impl concreta em vez de porta outbound | 🔴 erro |
-| H4 | `adapter/inbound` chama `adapter/outbound` direto (deve passar pelo core) | 🟡 warning |
-| H5 | porta declarada fora de `core/port/` | 🟡 warning |
+| H1 | `core` imports `adapter` | 🔴 error |
+| H2 | `core/domain` does I/O or imports an I/O package | 🔴 error |
+| H3 | `service` uses a concrete impl instead of an outbound port | 🔴 error |
+| H4 | `adapter/inbound` calls `adapter/outbound` directly (must go through the core) | 🟡 warning |
+| H5 | port declared outside `core/port/` | 🟡 warning |
 
 ---
 
 ## 3. MVC — Model / View / Controller  (`--arch mvc`)
 
-Para apps web tradicionais. Governança mais leve.
+For traditional web apps. Lighter governance.
 
 ```
-meu-app/
+my-app/
 ├── vader.toml
 ├── cmd/
 │   └── main.vd
-├── model/                            # dados + regra de negócio
+├── model/                            # data + business rule
 │   ├── user.vd
 │   └── user_test.vd
-├── view/                             # apresentação (serializers / DTO de saída)
+├── view/                            # presentation (serializers / output DTO)
 │   └── user_view.vd
-├── controller/                       # orquestra request → model → view
+├── controller/                      # orchestrates request → model → view
 │   ├── user_controller.vd
 │   └── user_controller_test.vd
-└── infra/                            # db, clients (opcional)
+└── infra/                            # db, clients (optional)
     └── db/user_store.vd
 ```
 
 **Ruleset:**
-| # | Regra | Sev |
+| # | Rule | Sev |
 |---|---|---|
-| M1 | `model` importa `controller` ou `view` (o model é o núcleo) | 🔴 erro |
-| M2 | `view` acessa `infra`/banco direto | 🔴 erro |
-| M3 | `controller` carrega regra de negócio pesada (devia estar no model) | 🟡 warning |
-| M4 | `view` acessa `model` sem passar pelo `controller` | 🟡 warning |
+| M1 | `model` imports `controller` or `view` (the model is the core) | 🔴 error |
+| M2 | `view` accesses `infra`/database directly | 🔴 error |
+| M3 | `controller` carries heavy business logic (should be in the model) | 🟡 warning |
+| M4 | `view` accesses `model` without going through the `controller` | 🟡 warning |
 
 ---
 
 ## 4. Minimal / flat  (`--arch minimal`)
 
-Para `lib`, `cli` e scripts. **Sem regras de arquitetura** — só as garantias universais
-(teste espelho auto-gerado, `fmt`, `lint` básico).
+For `lib`, `cli`, and scripts. **No architecture rules** — only the universal guarantees
+(auto-generated mirror test, `fmt`, basic `lint`).
 
 ```
-meu-cli/
+my-cli/
 ├── vader.toml
 ├── cmd/
 │   └── main.vd
@@ -133,12 +133,12 @@ meu-cli/
     └── foo_test.vd
 ```
 
-**Ruleset:** nenhuma regra de camada. Liberdade total de organização.
+**Ruleset:** no layer rules. Total freedom of organization.
 
 ---
 
-## Garantias universais (valem em TODA arquitetura)
+## Universal guarantees (apply in EVERY architecture)
 
-- Cada função nasce/atualiza seu `*_test.vd` espelho (TDD por padrão).
-- `vader fmt` — formatação única.
-- `vader lint` — checa o ruleset da arquitetura declarada + boas práticas gerais.
+- Each function is born with / updates its mirror `*_test.vd` (TDD by default).
+- `vader fmt` — single formatting.
+- `vader lint` — checks the declared architecture's ruleset + general best practices.

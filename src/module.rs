@@ -1,12 +1,12 @@
-//! Sistema de módulos v1: compila um projeto multi-arquivo como um programa só.
+//! Module system v1: compiles a multi-file project as a single program.
 //!
-//! Estratégia: junta todos os `.vd` do projeto e **normaliza os nomes qualificados**
+//! Strategy: joins all the project's `.vd` files and **normalizes qualified names**
 //! (`domain.User` -> `User`, `usecase.CreateUser{...}` -> `CreateUser{...}`),
-//! tratando o projeto como um namespace plano. Os qualificadores reconhecidos são
-//! os nomes de pasta + o último segmento dos imports. Field access em variáveis
-//! (`uc.repo`) NÃO é afetado — só `pacote.Símbolo`.
+//! treating the project as a flat namespace. The recognized qualifiers are the
+//! folder names + the last segment of the imports. Field access on variables
+//! (`uc.repo`) is NOT affected — only `package.Symbol`.
 //!
-//! Pré-requisito: nomes de tipo/função únicos no projeto (o que os scaffolds garantem).
+//! Prerequisite: unique type/function names in the project (which the scaffolds guarantee).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -14,15 +14,15 @@ use std::path::{Path, PathBuf};
 use crate::ast::*;
 use crate::{lexer, parser};
 
-/// Carrega todos os `.vd` de um diretório como um único `Program` normalizado.
-/// `include_tests` controla se arquivos `*_test.vd` entram (sim para `vader test`).
+/// Loads all `.vd` files from a directory as a single normalized `Program`.
+/// `include_tests` controls whether `*_test.vd` files are included (yes for `vader test`).
 pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
     let mut files = Vec::new();
     gather(Path::new(dir), include_tests, &mut files)?;
     if files.is_empty() {
         return Err(format!("no .vd files under `{}`", dir));
     }
-    // dependências do `vader.toml`: faz fetch (git clone no cache) e injeta os `.vd`
+    // `vader.toml` dependencies: fetches them (git clone into the cache) and injects the `.vd` files
     let mut dep_packages: Vec<String> = Vec::new();
     if let Ok(toml) = std::fs::read_to_string(Path::new(dir).join("vader.toml")) {
         for d in crate::pkg::parse_deps(&toml) {
@@ -36,7 +36,7 @@ pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
 
     let mut packages: HashSet<String> = HashSet::new();
     for p in dep_packages {
-        packages.insert(p); // nome da dep = pacote pro `import`/normalização
+        packages.insert(p); // dep name = package for `import`/normalization
     }
     for f in &files {
         if let Some(parent) = f.parent().and_then(|p| p.file_name()) {
@@ -66,8 +66,8 @@ pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
     Ok(program)
 }
 
-/// Stdlib mínima: injeta os tipos dos pacotes `std/...` que o projeto importa,
-/// para o código transpilar. (v1: só `std/db` -> `Conn`.)
+/// Minimal stdlib: injects the types of the `std/...` packages the project imports,
+/// so the code transpiles. (v1: only `std/db` -> `Conn`.)
 fn inject_stdlib(imports: &[String], items: &mut Vec<Item>) {
     let uses_db = imports.iter().any(|i| i.starts_with("std/db"));
     let has_conn = items
@@ -112,7 +112,7 @@ fn strip(name: &str, packages: &HashSet<String>) -> Option<String> {
     }
 }
 
-/// Remove os qualificadores de pacote de toda a AST.
+/// Removes the package qualifiers from the entire AST.
 pub fn normalize(program: &mut Program, packages: &HashSet<String>) {
     for item in &mut program.items {
         match item {
@@ -229,7 +229,7 @@ fn normalize_stmt(s: &mut Stmt, packages: &HashSet<String>) {
 }
 
 fn normalize_expr(e: &mut Expr, packages: &HashSet<String>) {
-    // `pacote.símbolo` (Field cujo base é Ident de pacote) -> `símbolo`
+    // `package.symbol` (Field whose base is a package Ident) -> `symbol`
     let replacement = if let ExprKind::Field { base, field } = &e.kind {
         match &base.kind {
             ExprKind::Ident(p) if packages.contains(p) => Some(field.clone()),
@@ -309,13 +309,13 @@ mod tests {
         .unwrap();
         normalize(&mut prog, &packages(&["domain"]));
         let dump = format!("{:?}", prog);
-        assert!(!dump.contains("domain."), "sobrou qualificador: {}", dump);
+        assert!(!dump.contains("domain."), "qualifier left over: {}", dump);
         assert!(dump.contains("\"User\""));
     }
 
     #[test]
     fn rewrites_qualified_call_but_not_variable_field() {
-        // `src.greet(x)` -> `greet(x)`, mas `u.name` (variável) permanece.
+        // `src.greet(x)` -> `greet(x)`, but `u.name` (variable) remains.
         let mut prog = parser::parse(
             lexer::tokenize("fn f(u User): string {\n    print(src.greet(u.name))\n    return u.name\n}")
                 .unwrap(),
@@ -323,8 +323,8 @@ mod tests {
         .unwrap();
         normalize(&mut prog, &packages(&["src"]));
         let dump = format!("{:?}", prog);
-        assert!(!dump.contains("\"src\""), "src deveria ter sido removido: {}", dump);
-        // o field access em `u` (variável) deve permanecer
+        assert!(!dump.contains("\"src\""), "src should have been removed: {}", dump);
+        // the field access on `u` (variable) must remain
         assert!(dump.contains("Field"));
     }
 }

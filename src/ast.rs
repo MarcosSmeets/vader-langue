@@ -1,7 +1,7 @@
 //! Abstract syntax tree for Vader.
 //!
-//! Fase 1: funções, métodos, structs, interfaces, enums, genéricos, match,
-//! imports, statements e expressões.
+//! Phase 1: functions, methods, structs, interfaces, enums, generics, match,
+//! imports, statements and expressions.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -24,14 +24,14 @@ pub struct TestDef {
     pub body: Block,
 }
 
-/// Visibilidade de um símbolo. O padrão (sem modificador) é `Private`.
+/// Visibility of a symbol. The default (no modifier) is `Private`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     Public,
     Private,
 }
 
-/// Um parâmetro de tipo genérico: `T` ou `T Constraint`.
+/// A generic type parameter: `T` or `T Constraint`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeParam {
     pub name: String,
@@ -41,12 +41,12 @@ pub struct TypeParam {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub visibility: Visibility,
-    /// `Some` para métodos: `fn (u User) greeting() ...`
+    /// `Some` for methods: `fn (u User) greeting() ...`
     pub receiver: Option<Param>,
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
-    /// vazio = sem retorno; 1 = simples; vários = tupla `(int, error)`
+    /// empty = no return; 1 = single; many = tuple `(int, error)`
     pub returns: Vec<Type>,
     pub body: Block,
 }
@@ -67,7 +67,7 @@ pub struct InterfaceDef {
     pub methods: Vec<MethodSig>,
 }
 
-/// Assinatura de método numa interface (sem corpo).
+/// A method signature in an interface (no body).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodSig {
     pub name: String,
@@ -86,11 +86,11 @@ pub struct EnumDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
     pub name: String,
-    /// Campos opcionais que a variante carrega: `Circle(radius float)`.
+    /// Optional fields that the variant carries: `Circle(radius float)`.
     pub fields: Vec<Param>,
 }
 
-/// Um nome com seu tipo — serve para parâmetros, campos e declarações.
+/// A name with its type — used for parameters, fields and declarations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: String,
@@ -138,7 +138,7 @@ pub enum Stmt {
         chan: Expr,
         value: Expr,
     },
-    /// `assert <expr>` (dentro de blocos `test`)
+    /// `assert <expr>` (inside `test` blocks)
     Assert(Expr),
     Expr(Expr),
 }
@@ -150,9 +150,9 @@ pub enum ForHead {
     In { var: String, iter: Expr },    // for x in expr { }
 }
 
-/// Uma expressão com a posição (linha:coluna) onde começa — usada nos erros.
-/// A posição é ignorada na comparação (`PartialEq`), pra `fmt`/round-trip
-/// compararem só a estrutura, não onde o código está no arquivo.
+/// An expression with the position (line:column) where it starts — used in errors.
+/// The position is ignored in comparison (`PartialEq`), so `fmt`/round-trip
+/// compare only the structure, not where the code sits in the file.
 #[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
@@ -200,7 +200,7 @@ pub enum ExprKind {
         fields: Vec<(String, Expr)>,
     },
     SliceLit(Vec<Expr>),
-    /// `<-ch` (recebe de um canal)
+    /// `<-ch` (receives from a channel)
     Recv(Box<Expr>),
     Match {
         scrutinee: Box<Expr>,
@@ -210,7 +210,7 @@ pub enum ExprKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
-    /// Uma ou mais alternativas: `400, 404:`
+    /// One or more alternatives: `400, 404:`
     pub patterns: Vec<Pattern>,
     pub guard: Option<Expr>,
     pub body: MatchArmBody,
@@ -226,7 +226,7 @@ pub enum MatchArmBody {
 pub enum Pattern {
     Wildcard,                                        // _
     Literal(Expr),                                   // 200, "x", true, nil
-    Binding(String),                                 // n  (ou variante nullary, resolvido no checker)
+    Binding(String),                                 // n  (or a nullary variant, resolved in the checker)
     Variant { name: String, bindings: Vec<String> }, // Circle(r), Rectangle(w, h)
 }
 

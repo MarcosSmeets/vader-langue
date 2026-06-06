@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Demo: roda a CLI `vader lex` num arquivo de exemplo, dentro do WSL.
+# Demo: runs the `vader lex` CLI on an example file, inside WSL.
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
 PROJECT="/mnt/c/Users/marco/Documents/workspace/side_projects/vader"

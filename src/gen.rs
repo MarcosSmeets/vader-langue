@@ -1,9 +1,9 @@
-//! `vader gen <thing> <Name>`: gera um artefato (função, struct, usecase, handler)
-//! **sempre junto do seu teste espelho** — TDD por padrão é a regra, não opção.
+//! `vader gen <thing> <Name>`: generates an artifact (function, struct, usecase, handler)
+//! **always alongside its mirror test** — TDD by default is the rule, not an option.
 //!
-//! `gen_files` é pura (devolve `(caminho, conteúdo)`); `create` grava em disco.
+//! `gen_files` is pure (returns `(path, content)`); `create` writes to disk.
 
-/// Converte PascalCase/camelCase para snake_case (para nomes de arquivo).
+/// Converts PascalCase/camelCase to snake_case (for file names).
 pub fn to_snake(s: &str) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
@@ -19,8 +19,8 @@ pub fn to_snake(s: &str) -> String {
     out
 }
 
-/// Lista de arquivos `(caminho relativo ao cwd, conteúdo)` para o artefato.
-/// Sempre inclui o arquivo de implementação **e** o `_test.vd` espelho.
+/// List of files `(path relative to cwd, content)` for the artifact.
+/// Always includes the implementation file **and** the mirror `_test.vd`.
 pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, String> {
     let snake = to_snake(name);
     match thing {
@@ -34,7 +34,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
             (
                 format!("{snake}_test.vd"),
                 format!(
-                    "// auto-gerado junto com a função (TDD por padrão).\n\n\
+                    "// auto-generated alongside the function (TDD by default).\n\n\
                      test \"{name} works\" {{\n    \
                          // TODO: arrange / act / assert\n    \
                          assert true\n\
@@ -50,7 +50,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
             (
                 format!("{snake}_test.vd"),
                 format!(
-                    "// auto-gerado junto com o struct (TDD por padrão).\n\n\
+                    "// auto-generated alongside the struct (TDD by default).\n\n\
                      test \"{name} can be built\" {{\n    \
                          {name} value = {name}{{ id: 1 }}\n    \
                          assert value.id == 1\n\
@@ -63,7 +63,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
                 format!("usecase/{snake}.vd"),
                 format!(
                     "public struct {name} {{\n    \
-                         // TODO: injete as portas (Repository/Gateway) necessárias\n\
+                         // TODO: inject the required ports (Repository/Gateway)\n\
                      }}\n\n\
                      public fn (uc {name}) execute(): (bool, error) {{\n    \
                          // TODO: implement\n    \
@@ -74,7 +74,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
             (
                 format!("usecase/{snake}_test.vd"),
                 format!(
-                    "// auto-gerado junto com o caso de uso (TDD por padrão).\n\n\
+                    "// auto-generated alongside the use case (TDD by default).\n\n\
                      test \"{name}.execute runs\" {{\n    \
                          {name} uc = {name}{{}}\n    \
                          bool ok, error err = uc.execute()\n    \
@@ -90,7 +90,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
                 format!(
                     "public struct {name} {{\n}}\n\n\
                      public fn (h {name}) handle(): (int, error) {{\n    \
-                         // TODO: chamar o caso de uso\n    \
+                         // TODO: call the use case\n    \
                          return 200, nil\n\
                      }}\n",
                 ),
@@ -98,7 +98,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
             (
                 format!("adapter/http/{snake}_test.vd"),
                 format!(
-                    "// auto-gerado junto com o handler (TDD por padrão).\n\n\
+                    "// auto-generated alongside the handler (TDD by default).\n\n\
                      test \"{name}.handle returns 200\" {{\n    \
                          {name} h = {name}{{}}\n    \
                          int status, error err = h.handle()\n    \
@@ -115,7 +115,7 @@ pub fn gen_files(thing: &str, name: &str) -> Result<Vec<(String, String)>, Strin
     }
 }
 
-/// Grava os arquivos relativos ao diretório atual. Falha se algum já existir.
+/// Writes the files relative to the current directory. Fails if any already exists.
 pub fn create(thing: &str, name: &str) -> Result<Vec<String>, String> {
     let files = gen_files(thing, name)?;
     for (rel, _) in &files {
@@ -175,7 +175,7 @@ mod tests {
             let p = paths(t, "Thing");
             assert!(
                 p.iter().any(|x| x.ends_with("_test.vd")),
-                "{t} sem teste espelho"
+                "{t} without mirror test"
             );
         }
     }
@@ -187,12 +187,12 @@ mod tests {
 
     #[test]
     fn generated_code_parses() {
-        // o que o gen produz precisa ser Vader válido (parseável).
+        // what gen produces must be valid (parseable) Vader.
         for t in ["fn", "struct", "usecase", "handler"] {
             for (path, content) in gen_files(t, "Thing").unwrap() {
                 let toks = crate::lexer::tokenize(&content).unwrap();
                 crate::parser::parse(toks)
-                    .unwrap_or_else(|e| panic!("{} não parseia: {}", path, e));
+                    .unwrap_or_else(|e| panic!("{} does not parse: {}", path, e));
             }
         }
     }

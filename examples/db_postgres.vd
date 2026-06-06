@@ -1,5 +1,5 @@
-// Postgres pela rede — mesmo API do SQLite, só muda o DSN.
-// Requer um Postgres rodando (ex.: postgres://postgres:vader123@127.0.0.1:5432/vaderdb).
+// Postgres over the network — same API as SQLite, only the DSN changes.
+// Requires a running Postgres (e.g.: postgres://postgres:vader123@127.0.0.1:5432/vaderdb).
 import "std/db"
 
 public fn main() {

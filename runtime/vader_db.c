@@ -1,19 +1,19 @@
-/* Camada `std/db` do runtime da Vader: API única (open, exec, query, next,
- * col_int/col_text/col_float, close) que despacha pro driver certo conforme o DSN:
- *   - "postgres://..."/"postgresql://..."  -> driver Postgres (runtime/vader_pg.c)
- *   - qualquer outra coisa (caminho/arquivo) -> SQLite embarcado (runtime/sqlite/)
+/* Vader runtime `std/db` layer: single API (open, exec, query, next,
+ * col_int/col_text/col_float, close) that dispatches to the right driver based on the DSN:
+ *   - "postgres://..."/"postgresql://..."  -> Postgres driver (runtime/vader_pg.c)
+ *   - anything else (path/file) -> embedded SQLite (runtime/sqlite/)
  *
- * Os handles carregam uma tag interna; pro IR continuam sendo i8* opacos.
- * Sem-GC: strings retornadas vazam, alinhado com o runtime. */
+ * Handles carry an internal tag; to the IR they remain opaque i8*.
+ * No GC: returned strings leak, in line with the runtime. */
 #include "sqlite3.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* alocador de arena (vader_mem.c): leituras de banco são scratch por request */
+/* arena allocator (vader_mem.c): database reads are per-request scratch */
 extern char *vader_strdup(const char *s);
 
-/* driver Postgres (vader_pg.c) — visto como ponteiros opacos aqui */
+/* Postgres driver (vader_pg.c) — seen as opaque pointers here */
 extern void *vader_pg_connect(const char *dsn);
 extern const char *vader_pg_exec(void *c, const char *sql);
 extern void *vader_pg_query(void *c, const char *sql);
@@ -21,7 +21,7 @@ extern int vader_pg_next(void *r);
 extern const char *vader_pg_text(void *r, int col);
 extern void vader_pg_close(void *c);
 
-/* driver MySQL (vader_mysql.c) */
+/* MySQL driver (vader_mysql.c) */
 extern void *vader_my_connect(const char *dsn);
 extern const char *vader_my_exec(void *c, const char *sql);
 extern void *vader_my_query(void *c, const char *sql);
@@ -72,13 +72,13 @@ void *vader_db_open(const char *dsn) {
 
 const char *vader_db_exec(void *handle, const char *sql) {
     VDB *d = handle;
-    if (!d) return vader_strdup("conexão nula");
+    if (!d) return vader_strdup("null connection");
     if (d->kind == K_PG) return vader_pg_exec(d->h, sql);
     if (d->kind == K_MYSQL) return vader_my_exec(d->h, sql);
     char *err = 0;
     int rc = sqlite3_exec((sqlite3 *)d->h, sql, 0, 0, &err);
     if (rc != SQLITE_OK) {
-        const char *msg = vader_strdup(err ? err : "erro SQL desconhecido");
+        const char *msg = vader_strdup(err ? err : "unknown SQL error");
         if (err) sqlite3_free(err);
         return msg;
     }
@@ -143,11 +143,11 @@ const char *vader_db_col_text(void *rowsh, int col) {
     return vader_strdup(t ? (const char *)t : "");
 }
 
-/* exec que aborta (exit 1) se o SQL falhar — útil pra migrations e scripts. */
+/* exec that aborts (exit 1) if the SQL fails — useful for migrations and scripts. */
 void vader_db_must(void *handle, const char *sql) {
     const char *err = vader_db_exec(handle, sql);
     if (err) {
-        fprintf(stderr, "erro de SQL: %s\n", err);
+        fprintf(stderr, "SQL error: %s\n", err);
         exit(1);
     }
 }

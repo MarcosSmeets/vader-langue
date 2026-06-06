@@ -59,8 +59,8 @@ pub enum TokenKind {
     And,       // &&
     Or,        // ||
     Not,       // !
-    DotDot,    // ..  (range exclusivo)
-    DotDotEq,  // ..= (range inclusivo)
+    DotDot,    // ..  (exclusive range)
+    DotDotEq,  // ..= (inclusive range)
 
     /// End of input.
     Eof,

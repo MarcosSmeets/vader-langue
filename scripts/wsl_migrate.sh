@@ -7,7 +7,7 @@ cargo build 2>&1 | grep -E '^error' | head -30
 cargo test --quiet 2>&1 | grep -E 'test result' | head -1
 BIN="$ROOT/target/debug/vader"
 
-echo "=== monta projeto com migrations ==="
+echo "=== sets up project with migrations ==="
 rm -rf /tmp/mproj /tmp/m.db
 mkdir -p /tmp/mproj/migrations
 cd /tmp/mproj
@@ -26,10 +26,10 @@ cat > migrations/0001_users.down.sql <<'EOF'
 drop table users;
 EOF
 
-echo "=== status (antes) ==="; "$BIN" migrate status
+echo "=== status (before) ==="; "$BIN" migrate status
 echo "=== migrate up ==="; "$BIN" migrate up
-echo "=== status (depois) ==="; "$BIN" migrate status
-echo "=== confirma os dados gravados no /tmp/m.db ==="
+echo "=== status (after) ==="; "$BIN" migrate status
+echo "=== confirms the data written to /tmp/m.db ==="
 cat > /tmp/check.vd <<'EOF'
 import "std/db"
 public fn main() {
@@ -44,5 +44,5 @@ public fn main() {
 }
 EOF
 "$BIN" llvm /tmp/check.vd 2>&1 | grep -vE 'emitted|compiled|linkando|compilando' | tail -5
-echo "=== migrate down (reverte) ==="; "$BIN" migrate down
-echo "=== status (após down) ==="; "$BIN" migrate status
+echo "=== migrate down (reverts) ==="; "$BIN" migrate down
+echo "=== status (after down) ==="; "$BIN" migrate status

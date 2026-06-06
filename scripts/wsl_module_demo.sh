@@ -8,12 +8,12 @@ BIN="$PWD/target/debug/vader"
 WORK=/tmp/vader_module_demo
 rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK" || exit 1
 
-echo "########## 1) scaffold minimal -> vader run no DIRETÓRIO ##########"
+echo "########## 1) scaffold minimal -> vader run on the DIRECTORY ##########"
 "$BIN" new cli demo --arch minimal >/dev/null
 "$BIN" run demo
 echo
 
-echo "########## 2) projeto domain + cmd com tipos qualificados ##########"
+echo "########## 2) domain + cmd project with qualified types ##########"
 mkdir -p proj/cmd proj/domain
 cat > proj/domain/user.vd <<'EOF'
 public struct User {
@@ -33,7 +33,7 @@ public fn main() {
     print(domain.describe(u))
 }
 EOF
-echo "--- estrutura ---"
+echo "--- structure ---"
 find proj -type f | sort
 echo "--- vader run proj ---"
 "$BIN" run proj

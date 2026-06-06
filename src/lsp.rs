@@ -1,16 +1,16 @@
-//! `vader lsp` — Language Server por stdio.
+//! `vader lsp` — Language Server over stdio.
 //!
-//! Reusa o MESMO lexer/parser/checker do compilador e publica diagnósticos
-//! (erros de parse e de tipo, com linha:coluna) no editor. Sem reimplementar
-//! análise. Sync de documento é "full" (o editor manda o texto inteiro a cada
-//! mudança), então cada `didOpen`/`didChange` recalcula tudo.
+//! Reuses the SAME lexer/parser/checker as the compiler and publishes diagnostics
+//! (parse and type errors, with line:column) to the editor. No reimplemented
+//! analysis. Document sync is "full" (the editor sends the whole text on each
+//! change), so each `didOpen`/`didChange` recomputes everything.
 
 use std::io::{self, BufRead, Write};
 
 use crate::json::Json;
 use crate::{check, lexer, parser};
 
-/// Roda o loop de IO do servidor até EOF ou `exit`.
+/// Runs the server's IO loop until EOF or `exit`.
 pub fn run() {
     let stdin = io::stdin();
     let mut r = stdin.lock();
@@ -27,7 +27,7 @@ pub fn run() {
     }
 }
 
-/// Lê uma mensagem LSP (cabeçalhos `Content-Length` + corpo). `None` no EOF.
+/// Reads an LSP message (`Content-Length` headers + body). `None` at EOF.
 fn read_message(r: &mut impl BufRead) -> Option<String> {
     let mut len = 0usize;
     loop {
@@ -38,7 +38,7 @@ fn read_message(r: &mut impl BufRead) -> Option<String> {
         }
         let t = line.trim_end();
         if t.is_empty() {
-            break; // fim dos cabeçalhos
+            break; // end of headers
         }
         if let Some(v) = t.strip_prefix("Content-Length:") {
             len = v.trim().parse().ok()?;
@@ -55,8 +55,8 @@ fn method_of(msg: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Processa uma mensagem JSON-RPC crua e devolve os payloads a enviar de volta.
-/// Stateless (o texto vem na própria mensagem) — fácil de testar.
+/// Processes a raw JSON-RPC message and returns the payloads to send back.
+/// Stateless (the text comes in the message itself) — easy to test.
 pub fn handle(msg: &str) -> Vec<String> {
     let json = match crate::json::parse(msg) {
         Some(j) => j,
@@ -87,7 +87,7 @@ fn init_result() -> Json {
         (
             "capabilities".into(),
             Json::Obj(vec![
-                // 1 = sync "full": o editor reenvia o texto inteiro a cada mudança
+                // 1 = "full" sync: the editor resends the whole text on each change
                 ("textDocumentSync".into(), Json::Num(1.0)),
             ]),
         ),
@@ -122,12 +122,12 @@ fn change_params(j: &Json) -> Option<(String, String)> {
     Some((uri, text))
 }
 
-/// Monta a notificação `textDocument/publishDiagnostics` para um documento.
+/// Builds the `textDocument/publishDiagnostics` notification for a document.
 fn publish_payload(uri: &str, text: &str) -> String {
     let arr: Vec<Json> = diagnostics(text)
         .into_iter()
         .map(|(line, col, msg)| {
-            let l = line.saturating_sub(1) as f64; // LSP é 0-based
+            let l = line.saturating_sub(1) as f64; // LSP is 0-based
             let c = col.saturating_sub(1) as f64;
             Json::Obj(vec![
                 (
@@ -172,7 +172,7 @@ fn publish_payload(uri: &str, text: &str) -> String {
     .to_string()
 }
 
-/// Roda o pipeline e devolve (linha, coluna, mensagem) — 1-based, como o compilador.
+/// Runs the pipeline and returns (line, column, message) — 1-based, like the compiler.
 fn diagnostics(src: &str) -> Vec<(usize, usize, String)> {
     let tokens = match lexer::tokenize(src) {
         Ok(t) => t,
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn didopen_publishes_diagnostics_for_bad_code() {
-        // erro de tipo: chama função inexistente
+        // type error: calls a nonexistent function
         let msg = r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///x.vd","text":"fn main() { nope() }"}}}"#;
         let out = handle(msg);
         assert_eq!(out.len(), 1);

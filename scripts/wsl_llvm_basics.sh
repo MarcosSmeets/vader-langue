@@ -8,5 +8,5 @@ BIN="$PWD/target/debug/vader"
 echo "=== vader llvm examples/basics.vd ==="
 "$BIN" llvm examples/basics.vd
 echo "exit=$?"
-echo "=== (se falhou no clang) IR gerado: ==="
+echo "=== (if clang failed) generated IR: ==="
 test -f /tmp/vader_llvm/out.ll && wc -l /tmp/vader_llvm/out.ll

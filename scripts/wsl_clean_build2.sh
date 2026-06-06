@@ -7,8 +7,8 @@ cd /tmp/vader_clean_demo || exit 1
 echo "=== vader build loja ==="
 "$BIN" build loja
 echo "exit=$?"
-echo "=== arquivos ==="
-ls -la loja/loja 2>/dev/null && echo "(binário existe)" || echo "(sem binário loja/loja)"
+echo "=== files ==="
+ls -la loja/loja 2>/dev/null && echo "(binary exists)" || echo "(no binary loja/loja)"
 ls -la ./loja 2>/dev/null | head -1
-echo "=== procurando binário ELF ==="
+echo "=== searching for ELF binary ==="
 find . -maxdepth 2 -type f -name loja -exec file {} \;

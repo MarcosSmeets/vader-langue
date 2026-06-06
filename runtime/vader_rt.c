@@ -1,12 +1,12 @@
-// vader_rt.c — runtime de concorrência da Vader (canais + goroutines via pthreads).
-// Linkado pelo `clang` junto do LLVM IR gerado. Memória vaza (sem-GC, por enquanto).
+// vader_rt.c — Vader concurrency runtime (channels + goroutines via pthreads).
+// Linked by `clang` together with the generated LLVM IR. Memory leaks (no GC, for now).
 
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
-    char *buf;        // buffer circular: cap slots de elemsize bytes
+    char *buf;        // circular buffer: cap slots of elemsize bytes
     long elemsize;
     long cap;
     long count;
@@ -50,7 +50,7 @@ void vader_chan_send(void *ch, void *elem) {
     pthread_mutex_unlock(&c->mu);
 }
 
-// 1 se recebeu; 0 se o canal está fechado e vazio.
+// 1 if received; 0 if the channel is closed and empty.
 int vader_chan_recv(void *ch, void *out) {
     VaderChan *c = (VaderChan *)ch;
     pthread_mutex_lock(&c->mu);
@@ -77,20 +77,20 @@ void vader_chan_close(void *ch) {
     pthread_mutex_unlock(&c->mu);
 }
 
-// dispara uma goroutine (thread destacada) que roda fn(arg).
+// spawns a goroutine (detached thread) that runs fn(arg).
 void vader_go(void *(*fn)(void *), void *arg) {
     pthread_t t;
     pthread_create(&t, NULL, fn, arg);
     pthread_detach(t);
 }
 
-// ---- maps (hash table com encadeamento; chave int OU string) ----
+// ---- maps (hash table with chaining; int OR string key) ----
 
 #define VMAP_BUCKETS 64
 
 typedef struct VEntry {
     long ikey;
-    char *skey; // NULL para chave int
+    char *skey; // NULL for int key
     void *val;
     struct VEntry *next;
 } VEntry;

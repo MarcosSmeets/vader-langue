@@ -1,4 +1,4 @@
-// JSON nativo: parse, acessores e builder + encode.
+// Native JSON: parse, accessors and builder + encode.
 import "std/json"
 
 public fn main() {

@@ -10,21 +10,23 @@
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-/// Runtime de concorrência (C), embutido no binário e linkado pelo clang quando há canais.
+/// Concurrency runtime (C), embedded in the binary and linked by clang when there are channels.
 const RUNTIME_C: &str = include_str!("../runtime/vader_rt.c");
-/// SQLite (amalgamation, domínio público) + wrapper, embutidos e linkados quando usa `std/db`.
+/// SQLite (amalgamation, public domain) + wrapper, embedded and linked when using `std/db`.
 const SQLITE_C: &str = include_str!("../runtime/sqlite/sqlite3.c");
 const SQLITE_H: &str = include_str!("../runtime/sqlite/sqlite3.h");
 const VADER_DB_C: &str = include_str!("../runtime/vader_db.c");
-/// Driver Postgres (wire protocol puro: TCP + auth SCRAM + simple query).
+/// Postgres driver (pure wire protocol: TCP + SCRAM auth + simple query).
 const VADER_PG_C: &str = include_str!("../runtime/vader_pg.c");
-/// Driver MySQL/MariaDB (protocolo nativo + mysql_native_password).
+/// MySQL/MariaDB driver (native protocol + mysql_native_password).
 const VADER_MYSQL_C: &str = include_str!("../runtime/vader_mysql.c");
-/// stdlib: HTTP (servidor + cliente) e JSON (parse/encode), linkados sob demanda.
+/// stdlib: HTTP (server + client) and JSON (parse/encode), linked on demand.
 const VADER_HTTP_C: &str = include_str!("../runtime/vader_http.c");
 const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
-/// Alocador de arena/região (memória de serviço longo): bump-alloc por escopo.
+/// Arena/region allocator (long-lived service memory): bump-alloc per scope.
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
+/// std/os and std/env: access to the process environment.
+const VADER_OS_C: &str = include_str!("../runtime/vader_os.c");
 
 use vader::ast::Program;
 use vader::{
@@ -33,7 +35,7 @@ use vader::{
 };
 
 fn usage() {
-    eprintln!("vader {} — compiler (Fase 1)", env!("CARGO_PKG_VERSION"));
+    eprintln!("vader {} — compiler (Phase 1)", env!("CARGO_PKG_VERSION"));
     eprintln!("usage:");
     eprintln!("  vader new <kind> <name> [--arch <arch>]   scaffold a project");
     eprintln!("       kind: api|worker|cli|lib   arch: clean|hexagonal|mvc|minimal");
@@ -122,7 +124,7 @@ fn main() -> ExitCode {
     let command = args[1].as_str();
     let path = &args[2];
 
-    // Diretório: compila o projeto inteiro via sistema de módulos.
+    // Directory: compile the entire project via the module system.
     if Path::new(path).is_dir() {
         if !matches!(command, "check" | "build" | "run") {
             eprintln!("`{}` works on a single file, not a directory", command);
@@ -177,7 +179,7 @@ fn main() -> ExitCode {
     finish(command, path, program, false)
 }
 
-/// Pós-parse: type-check, lint de arquitetura e (build/run) gera Go e compila.
+/// Post-parse: type-check, architecture lint and (build/run) generate Go and compile.
 fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode {
     if let Err(errors) = check::check(&program) {
         for e in &errors {
@@ -187,7 +189,7 @@ fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode
         return ExitCode::FAILURE;
     }
 
-    // arquitetura: fiscaliza automaticamente (só arquivo solto; dir não tem 1 camada)
+    // architecture: enforced automatically (only for a standalone file; a dir has no single layer)
     if !is_dir && !lint_gate(path, &program.imports) {
         eprintln!("architecture violation(s); aborting");
         return ExitCode::FAILURE;
@@ -224,7 +226,7 @@ fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "a.out".to_string());
-        // num projeto (dir), o binário sai DENTRO da pasta pra não colidir com ela.
+        // in a project (dir), the binary goes INSIDE the folder so it doesn't collide with it.
         let out = if is_dir {
             Path::new(path).join(&stem)
         } else {
@@ -255,7 +257,7 @@ fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode
     }
 }
 
-/// `vader add <git-url|path>[@version] [name]` — adiciona uma dependência (git/URL).
+/// `vader add <git-url|path>[@version] [name]` — adds a dependency (git/URL).
 fn cmd_add(args: &[String]) -> ExitCode {
     let src = match args.get(2) {
         Some(s) => s,
@@ -264,13 +266,13 @@ fn cmd_add(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // `add <nome>` (sem barra/scheme) resolve pelo registro; senão é URL/caminho.
+    // `add <name>` (no slash/scheme) resolves via the registry; otherwise it's a URL/path.
     let dep = if is_bare_name(src) {
         let reg = match resolve_registry(args) {
             Some(r) => r,
             None => {
                 eprintln!(
-                    "`{}` parece um nome de pacote — passe --registry <dir|git-url>, defina VADER_REGISTRY, ou use a URL/caminho completo",
+                    "`{}` looks like a package name — pass --registry <dir|git-url>, set VADER_REGISTRY, or use the full URL/path",
                     src
                 );
                 return ExitCode::FAILURE;
@@ -296,7 +298,7 @@ fn cmd_add(args: &[String]) -> ExitCode {
     let url = dep.url.clone();
     let version = dep.version.clone();
 
-    println!("buscando `{}` de {}...", name, url);
+    println!("fetching `{}` from {}...", name, url);
     let commit = match pkg::fetch(&dep) {
         Ok((_dir, c)) => c,
         Err(e) => {
@@ -320,7 +322,7 @@ fn cmd_add(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `vader remove <name>` — remove uma dependência do `vader.toml`.
+/// `vader remove <name>` — removes a dependency from `vader.toml`.
 fn cmd_remove(args: &[String]) -> ExitCode {
     let name = match args.get(2) {
         Some(s) => s,
@@ -334,7 +336,7 @@ fn cmd_remove(args: &[String]) -> ExitCode {
     let before = deps.len();
     deps.retain(|d| &d.name != name);
     if deps.len() == before {
-        eprintln!("`{}` não está nas dependências", name);
+        eprintln!("`{}` is not in the dependencies", name);
         return ExitCode::FAILURE;
     }
     let _ = std::fs::write("vader.toml", pkg::write_deps(&toml, &deps));
@@ -343,12 +345,12 @@ fn cmd_remove(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `vader publish [--registry <dir|git-url>]` — registra o pacote atual no índice.
+/// `vader publish [--registry <dir|git-url>]` — registers the current package in the index.
 fn cmd_publish(args: &[String]) -> ExitCode {
     let registry = match resolve_registry(args) {
         Some(r) => r,
         None => {
-            eprintln!("informe o registro: --registry <dir|git-url> ou a env VADER_REGISTRY");
+            eprintln!("provide the registry: --registry <dir|git-url> or the VADER_REGISTRY env var");
             return ExitCode::FAILURE;
         }
     };
@@ -356,13 +358,13 @@ fn cmd_publish(args: &[String]) -> ExitCode {
     let name = match toml_top_name(&toml) {
         Some(n) => n,
         None => {
-            eprintln!("vader.toml sem `name = \"...\"` — rode na raiz do projeto");
+            eprintln!("vader.toml has no `name = \"...\"` — run this at the project root");
             return ExitCode::FAILURE;
         }
     };
     let url = git_output(&["remote", "get-url", "origin"]).unwrap_or_default();
     if url.is_empty() {
-        eprintln!("sem `git remote origin` — o pacote precisa de um repositório git");
+        eprintln!("no `git remote origin` — the package needs a git repository");
         return ExitCode::FAILURE;
     }
     let version = git_output(&["describe", "--tags", "--abbrev=0"]).unwrap_or_default();
@@ -374,12 +376,12 @@ fn cmd_publish(args: &[String]) -> ExitCode {
     match pkg::registry_publish(&registry, &dep) {
         Ok(()) => {
             let v = if version.is_empty() {
-                "(sem tag)".to_string()
+                "(no tag)".to_string()
             } else {
                 version
             };
-            println!("publicado `{}` -> {} @ {} no registro {}", name, url, v, registry);
-            println!("(se o registro for um repo git, faça commit+push do index.json)");
+            println!("published `{}` -> {} @ {} in registry {}", name, url, v, registry);
+            println!("(if the registry is a git repo, commit+push index.json)");
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -389,7 +391,7 @@ fn cmd_publish(args: &[String]) -> ExitCode {
     }
 }
 
-/// Registro alvo: flag `--registry <reg>` ou env `VADER_REGISTRY`.
+/// Target registry: flag `--registry <reg>` or env `VADER_REGISTRY`.
 fn resolve_registry(args: &[String]) -> Option<String> {
     if let Some(i) = args.iter().position(|a| a == "--registry") {
         return args.get(i + 1).cloned();
@@ -397,7 +399,7 @@ fn resolve_registry(args: &[String]) -> Option<String> {
     std::env::var("VADER_REGISTRY").ok()
 }
 
-/// Heurística: um nome de pacote não tem barra, scheme nem ponto (≠ URL/caminho).
+/// Heuristic: a package name has no slash, scheme, or dot (≠ URL/path).
 fn is_bare_name(s: &str) -> bool {
     !s.is_empty()
         && !s.contains('/')
@@ -406,7 +408,7 @@ fn is_bare_name(s: &str) -> bool {
         && !s.contains('.')
 }
 
-/// Lê `name = "..."` do topo do `vader.toml` (antes de qualquer seção).
+/// Reads `name = "..."` from the top of `vader.toml` (before any section).
 fn toml_top_name(toml: &str) -> Option<String> {
     for line in toml.lines() {
         let t = line.trim();
@@ -422,7 +424,7 @@ fn toml_top_name(toml: &str) -> Option<String> {
     None
 }
 
-/// Roda `git <args>` e devolve o stdout (trim), ou None em falha/vazio.
+/// Runs `git <args>` and returns the stdout (trimmed), or None on failure/empty.
 fn git_output(args: &[&str]) -> Option<String> {
     let out = Command::new("git").args(args).output().ok()?;
     if !out.status.success() {
@@ -436,9 +438,9 @@ fn git_output(args: &[&str]) -> Option<String> {
     }
 }
 
-/// Regenera o `vader.lock` com os commits resolvidos de cada dependência.
+/// Regenerates `vader.lock` with the resolved commits of each dependency.
 fn write_lock(deps: &[pkg::Dep]) {
-    let mut out = String::from("# vader.lock — gerado automaticamente; commits resolvidos\n");
+    let mut out = String::from("# vader.lock — automatically generated; resolved commits\n");
     for d in deps {
         if let Ok((_p, commit)) = pkg::fetch(d) {
             out.push_str(&format!("{} = \"{}@{}\"\n", d.name, d.url, commit));
@@ -447,7 +449,7 @@ fn write_lock(deps: &[pkg::Dep]) {
     let _ = std::fs::write("vader.lock", out);
 }
 
-/// `vader llvm <file.vd>` — Vader -> LLVM IR (texto) -> clang -> binário nativo -> roda.
+/// `vader llvm <file.vd>` — Vader -> LLVM IR (text) -> clang -> native binary -> run.
 fn cmd_llvm(args: &[String]) -> ExitCode {
     let path = match args.iter().skip(2).find(|a| !a.starts_with("--")) {
         Some(p) => p,
@@ -473,8 +475,8 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
     }
 }
 
-/// Compila uma fonte Vader via LLVM + clang e roda o binário (Result, p/ reuso).
-/// `quiet` suprime os logs de progresso (usado pelo `vader migrate`).
+/// Compiles a Vader source via LLVM + clang and runs the binary (Result, for reuse).
+/// `quiet` suppresses the progress logs (used by `vader migrate`).
 fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> {
     let tokens = lexer::tokenize(source).map_err(|e| e.to_string())?;
     let mut program = parser::parse(tokens).map_err(|e| e.to_string())?;
@@ -510,11 +512,13 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
     if ir.contains("@vader_") {
         let rt = dir.join("vader_rt.c");
         let mem = dir.join("vader_mem.c");
+        let os = dir.join("vader_os.c");
         std::fs::write(&rt, RUNTIME_C).map_err(|e| format!("write runtime: {}", e))?;
         std::fs::write(&mem, VADER_MEM_C).map_err(|e| format!("write vader_mem.c: {}", e))?;
-        cmd.arg(&rt).arg(&mem).arg("-lpthread");
+        std::fs::write(&os, VADER_OS_C).map_err(|e| format!("write vader_os.c: {}", e))?;
+        cmd.arg(&rt).arg(&mem).arg(&os).arg("-lpthread");
         if !quiet {
-            println!("(linkando runtime + alocador de arena)");
+            println!("(linking runtime + arena allocator)");
         }
     }
     if ir.contains("@vader_db_") {
@@ -525,7 +529,7 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
             let src = dir.join("sqlite3.c");
             std::fs::write(&src, SQLITE_C).map_err(|e| format!("write sqlite3.c: {}", e))?;
             if !quiet {
-                println!("(compilando SQLite embarcado — só na primeira vez)");
+                println!("(compiling embedded SQLite — only the first time)");
             }
             let st = Command::new("clang")
                 .arg("-c")
@@ -537,7 +541,7 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
                 .status();
             match st {
                 Ok(s) if s.success() => {}
-                _ => return Err("clang falhou ao compilar o SQLite".into()),
+                _ => return Err("clang failed to compile SQLite".into()),
             }
         }
         let db_c = dir.join("vader_db.c");
@@ -548,12 +552,12 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
         std::fs::write(&my_c, VADER_MYSQL_C).map_err(|e| format!("write vader_mysql.c: {}", e))?;
         cmd.arg(&obj).arg(&db_c).arg(&pg_c).arg(&my_c);
         if tls {
-            // TLS pro Postgres (cloud): habilita o caminho OpenSSL no driver.
+            // TLS for Postgres (cloud): enables the OpenSSL path in the driver.
             cmd.arg("-DVADER_TLS").arg("-lssl").arg("-lcrypto");
         }
         cmd.arg("-lpthread").arg("-ldl").arg("-lm");
         if !quiet {
-            println!("(linkando SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
+            println!("(linking SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
         }
     }
     if ir.contains("@vader_http_") {
@@ -561,7 +565,7 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
         std::fs::write(&c, VADER_HTTP_C).map_err(|e| format!("write vader_http.c: {}", e))?;
         cmd.arg(&c);
         if !quiet {
-            println!("(linkando std/http)");
+            println!("(linking std/http)");
         }
     }
     if ir.contains("@vader_json_") {
@@ -569,22 +573,22 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
         std::fs::write(&c, VADER_JSON_C).map_err(|e| format!("write vader_json.c: {}", e))?;
         cmd.arg(&c);
         if !quiet {
-            println!("(linkando std/json)");
+            println!("(linking std/json)");
         }
     }
     cmd.arg("-o").arg(&bin);
     match cmd.status() {
         Ok(s) if s.success() => {}
-        Ok(_) => return Err("clang falhou ao compilar o IR".into()),
-        Err(e) => return Err(format!("falha ao invocar `clang`: {} (no PATH?)", e)),
+        Ok(_) => return Err("clang failed to compile the IR".into()),
+        Err(e) => return Err(format!("failed to invoke `clang`: {} (on PATH?)", e)),
     }
     if !quiet {
         println!("compiled with clang -> {}\n--- running ---", bin.display());
     }
     match Command::new(&bin).status() {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("o programa saiu com código {}", s.code().unwrap_or(-1))),
-        Err(e) => Err(format!("falha ao rodar o binário: {}", e)),
+        Ok(s) => Err(format!("the program exited with code {}", s.code().unwrap_or(-1))),
+        Err(e) => Err(format!("failed to run the binary: {}", e)),
     }
 }
 
@@ -623,43 +627,43 @@ fn cmd_migrate(args: &[String]) -> ExitCode {
     }
 }
 
-/// Executa migrations de verdade: gera um programinha Vader que abre o banco e roda o
-/// SQL via `db.must` (aborta se o SQL falhar), compila e roda. Só marca como aplicada
-/// se o processo sair com sucesso.
+/// Actually runs migrations: generates a small Vader program that opens the database and runs the
+/// SQL via `db.must` (aborts if the SQL fails), compiles and runs it. Only marks as applied
+/// if the process exits successfully.
 fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
     let dsn = resolve_migrate_dsn(args).ok_or(
-        "informe o banco: `vader migrate up --db <dsn>` ou defina [database] url no vader.toml",
+        "provide the database: `vader migrate up --db <dsn>` or set [database] url in vader.toml",
     )?;
     let tls = args.iter().any(|a| a == "--tls");
     if up {
         let pend = migrate::pending();
         if pend.is_empty() {
-            println!("nada pendente — tudo aplicado.");
+            println!("nothing pending — all applied.");
             return Ok(());
         }
         for name in pend {
-            println!("\u{25B6} aplicando {} ...", name);
+            println!("\u{25B6} applying {} ...", name);
             build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true, tls)
-                .map_err(|e| format!("falha em {}: {}", name, e))?;
+                .map_err(|e| format!("failed at {}: {}", name, e))?;
             migrate::mark_applied(&name)?;
         }
-        println!("ok — migrations aplicadas em {}", dsn);
+        println!("ok — migrations applied to {}", dsn);
     } else {
         match migrate::last_applied() {
-            None => println!("nenhuma migration aplicada."),
+            None => println!("no migration applied."),
             Some(name) => {
-                println!("\u{25C0} revertendo {} ...", name);
+                println!("\u{25C0} reverting {} ...", name);
                 build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true, tls)
-                    .map_err(|e| format!("falha ao reverter {}: {}", name, e))?;
+                    .map_err(|e| format!("failed to revert {}: {}", name, e))?;
                 migrate::unmark(&name)?;
-                println!("ok — revertida {}", name);
+                println!("ok — reverted {}", name);
             }
         }
     }
     Ok(())
 }
 
-/// Resolve o DSN do banco: flag `--db <dsn>` ou `[database] url` no `vader.toml`.
+/// Resolves the database DSN: flag `--db <dsn>` or `[database] url` in `vader.toml`.
 fn resolve_migrate_dsn(args: &[String]) -> Option<String> {
     if let Some(i) = args.iter().position(|a| a == "--db") {
         return args.get(i + 1).cloned();
@@ -683,7 +687,7 @@ fn resolve_migrate_dsn(args: &[String]) -> Option<String> {
     None
 }
 
-/// Escapa uma string pra um literal Vader.
+/// Escapes a string into a Vader literal.
 fn esc_vd(s: &str) -> String {
     let mut o = String::new();
     for c in s.chars() {
@@ -699,7 +703,7 @@ fn esc_vd(s: &str) -> String {
     o
 }
 
-/// Gera o programa Vader que aplica um bloco de SQL num banco (via `db.must`).
+/// Generates the Vader program that applies a block of SQL to a database (via `db.must`).
 fn migration_program(dsn: &str, sql: &str) -> String {
     format!(
         "import \"std/db\"\npublic fn main() {{\n    DB __c = db.open(\"{}\")\n    db.must(__c, \"{}\")\n    db.close(__c)\n}}\n",
@@ -714,7 +718,7 @@ fn cmd_template(args: &[String]) -> ExitCode {
         Some("list") => {
             let ts = templates::list();
             if ts.is_empty() {
-                println!("(nenhum template — crie com `vader template save <nome> <pasta>`)");
+                println!("(no templates — create one with `vader template save <name> <folder>`)");
             } else {
                 for t in ts {
                     println!("  {}", t);
@@ -745,9 +749,9 @@ fn cmd_template(args: &[String]) -> ExitCode {
     }
 }
 
-/// `vader new <kind> <name> [--arch <arch>]` ou `vader new --template <tmpl> <name>`
+/// `vader new <kind> <name> [--arch <arch>]` or `vader new --template <tmpl> <name>`
 fn cmd_new(args: &[String]) -> ExitCode {
-    // modo template customizado
+    // custom template mode
     if let Some(pos) = args.iter().position(|a| a == "--template") {
         let tmpl = match args.get(pos + 1) {
             Some(t) => t,
@@ -827,28 +831,28 @@ fn cmd_new(args: &[String]) -> ExitCode {
     }
 }
 
-/// Roda o linter de arquitetura se houver `architecture` no vader.toml.
-/// Retorna `true` se não houver erros (avisos não bloqueiam).
+/// Runs the architecture linter if there is `architecture` in vader.toml.
+/// Returns `true` if there are no errors (warnings do not block).
 fn lint_gate(file: &str, imports: &[String]) -> bool {
     let arch = match read_architecture() {
         Some(a) => a,
-        None => return true, // sem arquitetura configurada => sem regras
+        None => return true, // no architecture configured => no rules
     };
     let mut ok = true;
     for f in lint::lint(&arch, file, imports) {
         let mark = match f.severity {
             lint::Severity::Error => {
                 ok = false;
-                "\u{1F534} erro"
+                "\u{1F534} error"
             }
-            lint::Severity::Warning => "\u{1F7E1} aviso",
+            lint::Severity::Warning => "\u{1F7E1} warning",
         };
         eprintln!("{} [{}] {}", mark, f.rule, f.message);
     }
     ok
 }
 
-/// Lê `architecture = "..."` do `vader.toml` no diretório atual.
+/// Reads `architecture = "..."` from `vader.toml` in the current directory.
 fn read_architecture() -> Option<String> {
     let s = std::fs::read_to_string("vader.toml").ok()?;
     for line in s.lines() {
@@ -894,7 +898,7 @@ fn cmd_lint(args: &[String]) -> ExitCode {
     let arch = match arch_override.or_else(read_architecture) {
         Some(a) => a,
         None => {
-            println!("sem regras de arquitetura (defina `architecture` no vader.toml ou use --arch)");
+            println!("no architecture rules (set `architecture` in vader.toml or use --arch)");
             return ExitCode::SUCCESS;
         }
     };
@@ -923,14 +927,14 @@ fn cmd_lint(args: &[String]) -> ExitCode {
 
     let findings = lint::lint(&arch, file, &program.imports);
     if findings.is_empty() {
-        println!("ok: `{}` respeita a arquitetura `{}`", file, arch);
+        println!("ok: `{}` respects the architecture `{}`", file, arch);
         return ExitCode::SUCCESS;
     }
     let mut has_error = false;
     for f in &findings {
         let (mark, is_err) = match f.severity {
-            lint::Severity::Error => ("\u{1F534} erro", true),
-            lint::Severity::Warning => ("\u{1F7E1} aviso", false),
+            lint::Severity::Error => ("\u{1F534} error", true),
+            lint::Severity::Warning => ("\u{1F7E1} warning", false),
         };
         has_error |= is_err;
         println!("{} [{}] {}", mark, f.rule, f.message);
@@ -947,7 +951,7 @@ struct TestConfig {
     min: f64,
 }
 
-/// Lê `[test]` do `vader.toml` no diretório atual (parser de linha bem simples).
+/// Reads `[test]` from `vader.toml` in the current directory (very simple line parser).
 fn read_test_config() -> TestConfig {
     let mut cfg = TestConfig {
         gate: false,
@@ -986,8 +990,8 @@ fn install_pre_push_hook(file: &str) -> ExitCode {
     }
     let hook = hooks.join("pre-push");
     let content = format!(
-        "#!/bin/sh\n# Vader coverage gate (gerado por `vader test --install-hook`).\n\
-         # Desative em vader.toml: [test] coverage_gate = false\n\
+        "#!/bin/sh\n# Vader coverage gate (generated by `vader test --install-hook`).\n\
+         # Disable it in vader.toml: [test] coverage_gate = false\n\
          exec vader test {}\n",
         file
     );
@@ -1048,7 +1052,7 @@ fn cmd_test(args: &[String]) -> ExitCode {
         cfg.gate = true;
     }
 
-    // diretório => roda os testes do projeto inteiro (inclui `*_test.vd`)
+    // directory => runs the tests of the entire project (includes `*_test.vd`)
     let program = if Path::new(&file).is_dir() {
         match module::load(&file, true) {
             Ok(p) => p,
@@ -1186,10 +1190,10 @@ fn cmd_gen(args: &[String]) -> ExitCode {
     match gen::create(thing, name) {
         Ok(created) => {
             for path in &created {
-                let mark = if path.ends_with("_test.vd") { " (teste espelho)" } else { "" };
+                let mark = if path.ends_with("_test.vd") { " (mirror test)" } else { "" };
                 println!("  created {}{}", path, mark);
             }
-            println!("\nTDD por padrão: o teste nasceu junto. 🟢");
+            println!("\nTDD by default: the test was born alongside it. 🟢");
             ExitCode::SUCCESS
         }
         Err(e) => {

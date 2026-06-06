@@ -1,18 +1,18 @@
-//! Templates de projeto customizados pelo dev.
+//! Project templates customized by the dev.
 //!
-//! Um template é uma pasta em `~/.vader/templates/<nome>/`. Ao criar um projeto,
-//! o placeholder `__name__` é substituído pelo nome do projeto — tanto no conteúdo
-//! dos arquivos quanto nos nomes de arquivos/pastas. Assim o dev guarda seus
-//! próprios padrões (estrutura, libs, organização) e reusa com `vader new --template`.
+//! A template is a folder in `~/.vader/templates/<name>/`. When creating a project,
+//! the `__name__` placeholder is replaced by the project name — both in the file
+//! contents and in the file/folder names. This way the dev keeps their own
+//! patterns (structure, libs, organization) and reuses them with `vader new --template`.
 //!
-//! (Compartilhar templates pelo registro de pacotes é trabalho futuro.)
+//! (Sharing templates via the package registry is future work.)
 
 use std::path::{Path, PathBuf};
 
 const PLACEHOLDER: &str = "__name__";
 const SKIP: &[&str] = &[".git", "target", "node_modules"];
 
-/// Substitui o placeholder pelo nome do projeto.
+/// Replaces the placeholder with the project name.
 pub fn apply_name(s: &str, name: &str) -> String {
     s.replace(PLACEHOLDER, name)
 }
@@ -24,7 +24,7 @@ fn templates_dir() -> PathBuf {
     Path::new(&home).join(".vader").join("templates")
 }
 
-/// Lista os templates customizados disponíveis.
+/// Lists the available custom templates.
 pub fn list() -> Vec<String> {
     let mut names = Vec::new();
     if let Ok(entries) = std::fs::read_dir(templates_dir()) {
@@ -38,15 +38,15 @@ pub fn list() -> Vec<String> {
     names
 }
 
-/// Salva uma pasta como template `<name>`. Retorna quantos arquivos foram copiados.
+/// Saves a folder as template `<name>`. Returns how many files were copied.
 pub fn save(name: &str, src: &str) -> Result<usize, String> {
     let src = Path::new(src);
     if !src.is_dir() {
-        return Err(format!("`{}` não é uma pasta", src.display()));
+        return Err(format!("`{}` is not a folder", src.display()));
     }
     let dest = templates_dir().join(name);
     if dest.exists() {
-        return Err(format!("template `{}` já existe", name));
+        return Err(format!("template `{}` already exists", name));
     }
     let mut count = 0;
     copy_tree(src, &dest, &mut count)?;
@@ -73,13 +73,13 @@ fn copy_tree(src: &Path, dst: &Path, count: &mut usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Cria um projeto a partir do template `<name>`, substituindo `__name__` pelo
-/// nome do projeto. Falha se o template não existir ou o destino já existir.
+/// Creates a project from the template `<name>`, replacing `__name__` with the
+/// project name. Fails if the template does not exist or the destination already exists.
 pub fn create_from(name: &str, project: &str) -> Result<Vec<String>, String> {
     let tmpl = templates_dir().join(name);
     if !tmpl.is_dir() {
         return Err(format!(
-            "template `{}` não encontrado (veja `vader template list`)",
+            "template `{}` not found (see `vader template list`)",
             name
         ));
     }
@@ -108,7 +108,7 @@ fn instantiate(
             instantiate(&path, &dest, name, created)?;
         } else {
             let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-            // só substitui em arquivos de texto; binários são copiados como estão.
+            // only substitute in text files; binaries are copied as-is.
             match String::from_utf8(bytes.clone()) {
                 Ok(text) => std::fs::write(&dest, apply_name(&text, name)),
                 Err(_) => std::fs::write(&dest, bytes),
@@ -128,6 +128,6 @@ mod tests {
     fn substitutes_placeholder_everywhere() {
         assert_eq!(apply_name("import \"__name__/domain\"", "loja"), "import \"loja/domain\"");
         assert_eq!(apply_name("__name___test.vd", "loja"), "loja_test.vd");
-        assert_eq!(apply_name("sem placeholder", "loja"), "sem placeholder");
+        assert_eq!(apply_name("no placeholder", "loja"), "no placeholder");
     }
 }

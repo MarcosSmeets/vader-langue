@@ -10,7 +10,7 @@ BIN="$ROOT/target/debug/vader"
 rm -rf /tmp/reg /tmp/greeter /tmp/app2 "$HOME/.vader/pkg" "$HOME/.vader/registry"
 mkdir -p /tmp/reg
 
-echo "=== lib 'greeter' (repo git com tag + origin) ==="
+echo "=== lib 'greeter' (git repo with tag + origin) ==="
 mkdir -p /tmp/greeter
 printf 'public fn Greet(): string {\n    return "ola do pacote do registro!"\n}\n' > /tmp/greeter/greeter.vd
 printf 'name = "greeter"\n' > /tmp/greeter/vader.toml
@@ -20,12 +20,12 @@ git -C /tmp/greeter -c user.email=a@b.c -c user.name=t commit -qm v1
 git -C /tmp/greeter tag v1.0.0
 git -C /tmp/greeter remote add origin /tmp/greeter
 
-echo "=== vader publish (greeter -> registro /tmp/reg) ==="
+echo "=== vader publish (greeter -> registry /tmp/reg) ==="
 cd /tmp/greeter
 "$BIN" publish --registry /tmp/reg
 echo "--- index.json ---"; cat /tmp/reg/index.json; echo
 
-echo "=== projeto que faz 'vader add greeter' POR NOME ==="
+echo "=== project that does 'vader add greeter' BY NAME ==="
 mkdir -p /tmp/app2
 printf 'import "greeter"\n\npublic fn main() {\n    print(greeter.Greet())\n}\n' > /tmp/app2/main.vd
 printf 'name = "app2"\n' > /tmp/app2/vader.toml

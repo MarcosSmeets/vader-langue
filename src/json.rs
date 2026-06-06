@@ -1,5 +1,5 @@
-//! JSON mínimo, sem dependências — só o necessário pro Language Server.
-//! Parser recursivo + serializador. Preserva UTF-8 em strings (acumula bytes).
+//! Minimal JSON, no dependencies — just what the Language Server needs.
+//! Recursive parser + serializer. Preserves UTF-8 in strings (accumulates bytes).
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Json {
@@ -35,7 +35,7 @@ impl Json {
         }
     }
 
-    /// Serializa pra JSON compacto.
+    /// Serializes to compact JSON.
     pub fn to_string(&self) -> String {
         let mut s = String::new();
         self.write(&mut s);
@@ -95,7 +95,7 @@ fn write_str(s: &str, out: &mut String) {
     out.push('"');
 }
 
-/// Faz o parse de uma string JSON. Retorna `None` se for inválida.
+/// Parses a JSON string. Returns `None` if invalid.
 pub fn parse(s: &str) -> Option<Json> {
     let mut p = P { b: s.as_bytes(), i: 0 };
     p.ws();
@@ -227,7 +227,7 @@ impl<'a> P<'a> {
                         _ => return None,
                     }
                 }
-                _ => bytes.push(c), // byte cru (preserva UTF-8 multibyte)
+                _ => bytes.push(c), // raw byte (preserves multibyte UTF-8)
             }
         }
         None

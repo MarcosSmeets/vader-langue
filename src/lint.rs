@@ -1,10 +1,10 @@
-//! Linter de arquitetura: fiscaliza a regra de dependência da arquitetura do projeto.
+//! Architecture linter: enforces the project's architecture dependency rule.
 //!
-//! A camada de um arquivo vem do seu caminho (`domain/`, `usecase/`, ...); a camada
-//! de um import vem do caminho importado. A regra de ouro: **camada interna não pode
-//! importar camada externa**. Núcleo puro (camada 0) também não pode importar I/O.
+//! A file's layer comes from its path (`domain/`, `usecase/`, ...); an import's
+//! layer comes from the imported path. The golden rule: **an inner layer cannot
+//! import an outer layer**. A pure core (layer 0) also cannot import I/O.
 //!
-//! Detalhes e ruleset em `docs/architecture-rules.md`.
+//! Details and ruleset in `docs/architecture-rules.md`.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Severity {
@@ -19,7 +19,7 @@ pub struct Finding {
     pub message: String,
 }
 
-/// Rank da camada (menor = mais interno). `None` se o segmento não é uma camada.
+/// Layer rank (lower = more inner). `None` if the segment is not a layer.
 fn rank(arch: &str, seg: &str) -> Option<usize> {
     match arch {
         "clean" => match seg {
@@ -43,7 +43,7 @@ fn rank(arch: &str, seg: &str) -> Option<usize> {
     }
 }
 
-/// Rank da camada mais externa (onde I/O é permitido).
+/// Rank of the outermost layer (where I/O is allowed).
 fn max_rank(arch: &str) -> usize {
     match arch {
         "clean" => 3,
@@ -65,12 +65,12 @@ fn is_io(import: &str) -> bool {
     import.starts_with("std/db") || import.starts_with("std/http") || import.contains("net/http")
 }
 
-/// Roda o linter de arquitetura sobre um arquivo, dadas suas dependências.
+/// Runs the architecture linter over a file, given its dependencies.
 pub fn lint(arch: &str, file_path: &str, imports: &[String]) -> Vec<Finding> {
     let mut out = Vec::new();
     let (flayer, frank) = match layer_of(arch, file_path) {
         Some(x) => x,
-        None => return out, // arquivo fora de uma camada conhecida (ex.: cmd/, minimal)
+        None => return out, // file outside a known layer (e.g. cmd/, minimal)
     };
 
     for imp in imports {
@@ -79,7 +79,7 @@ pub fn lint(arch: &str, file_path: &str, imports: &[String]) -> Vec<Finding> {
                 severity: Severity::Error,
                 rule: "R3",
                 message: format!(
-                    "`{}` não pode importar I/O `{}` diretamente (vai pela porta na camada externa)",
+                    "`{}` cannot import I/O `{}` directly (go through the port in the outer layer)",
                     flayer, imp
                 ),
             });
@@ -91,7 +91,7 @@ pub fn lint(arch: &str, file_path: &str, imports: &[String]) -> Vec<Finding> {
                     severity: Severity::Error,
                     rule: "R1",
                     message: format!(
-                        "`{}` (interna) não pode importar `{}` (externa) — a dependência aponta para dentro",
+                        "`{}` (inner) cannot import `{}` (outer) — the dependency must point inward",
                         flayer, ilayer
                     ),
                 });

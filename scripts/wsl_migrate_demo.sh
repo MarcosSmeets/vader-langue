@@ -12,11 +12,11 @@ cd loja || exit 1
 
 echo "### vader migrate gen create_users"
 "$BIN" migrate gen create_users
-echo "### conteúdo do .up.sql"
+echo "### contents of the .up.sql"
 cat migrations/*.up.sql
 echo "### vader migrate status"
 "$BIN" migrate status
 echo "### vader migrate up"
 "$BIN" migrate up
-echo "### status de novo"
+echo "### status again"
 "$BIN" migrate status

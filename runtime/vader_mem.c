@@ -1,11 +1,11 @@
-/* Alocador de arena/região do runtime da Vader.
+/* Vader runtime arena/region allocator.
  *
- * Modelo: cada "escopo" (request HTTP, job de worker) é uma arena de blocos com
- * bump-allocation; libera-se o bloco inteiro de uma vez no fim. Sem-GC,
- * determinístico — alinhado com a visão tempo-real/embarcado.
+ * Model: each "scope" (HTTP request, worker job) is an arena of blocks with
+ * bump-allocation; the whole block is freed at once at the end. No GC,
+ * deterministic — in line with the real-time/embedded vision.
  *
- * `vader_alloc` usa a arena atual (thread-local). SEM arena ativa, cai em malloc
- * (vaza de propósito — modo embedded). `vader_scope`/`vader_release` empilham. */
+ * `vader_alloc` uses the current arena (thread-local). With NO active arena, it falls back to malloc
+ * (leaks on purpose — embedded mode). `vader_scope`/`vader_release` stack. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,10 +34,10 @@ static Block *block_new(unsigned long min) {
 
 void *vader_alloc(long n) {
     unsigned long sz = n > 0 ? (unsigned long)n : 1;
-    sz = (sz + 15) & ~15UL; /* alinha em 16 */
+    sz = (sz + 15) & ~15UL; /* align to 16 */
     Arena *a = g_cur;
     if (!a)
-        return malloc(sz); /* sem escopo: malloc (vaza; modo embedded/real-time) */
+        return malloc(sz); /* no scope: malloc (leaks; embedded/real-time mode) */
     if (!a->head || a->head->used + sz > a->head->cap) {
         Block *b = block_new(sz);
         b->next = a->head;
@@ -66,7 +66,7 @@ char *vader_strdup(const char *s) {
     return p;
 }
 
-/* abre um novo escopo de memória; retorna o handle da arena. */
+/* opens a new memory scope; returns the arena handle. */
 void *vader_scope(void) {
     Arena *a = (Arena *)malloc(sizeof(Arena));
     a->head = 0;
@@ -75,8 +75,8 @@ void *vader_scope(void) {
     return a;
 }
 
-/* reaproveita a arena: zera os blocos (mantém a capacidade) e a torna a atual.
-   Evita churn de malloc/free quando o mesmo escopo é reusado a cada iteração. */
+/* reuses the arena: resets the blocks (keeps the capacity) and makes it current.
+   Avoids malloc/free churn when the same scope is reused each iteration. */
 void vader_reset(void *arena) {
     Arena *a = (Arena *)arena;
     if (!a)
@@ -86,7 +86,7 @@ void vader_reset(void *arena) {
     g_cur = a;
 }
 
-/* libera tudo do escopo e restaura o anterior. */
+/* frees everything in the scope and restores the previous one. */
 void vader_release(void *arena) {
     Arena *a = (Arena *)arena;
     if (!a)

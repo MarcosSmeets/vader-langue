@@ -1,5 +1,5 @@
-// MySQL/MariaDB pela rede — mesmo API, DSN mysql://.
-// Requer um MySQL rodando e usuário com `IDENTIFIED WITH mysql_native_password`.
+// MySQL/MariaDB over the network — same API, mysql:// DSN.
+// Requires a running MySQL and a user with `IDENTIFIED WITH mysql_native_password`.
 import "std/db"
 
 public fn main() {

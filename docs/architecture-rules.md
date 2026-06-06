@@ -1,98 +1,98 @@
-# Vader — Regras de Arquitetura (governança embutida)
+# Vader — Architecture Rules (built-in governance)
 
-> A Vader **gera** projetos em arquiteturas opinativas e **fiscaliza** as convenções no
-> compilador/linter. Este é o diferencial nº1 da linguagem.
-> Este doc cobre os **conceitos de governança compartilhados** + o ruleset da **Clean
-> Architecture** em detalhe. Catálogo das demais (Hexagonal, MVC, Minimal) em
+> Vader **generates** projects in opinionated architectures and **enforces** the conventions in the
+> compiler/linter. This is the language's #1 differentiator.
+> This doc covers the **shared governance concepts** + the **Clean
+> Architecture** ruleset in detail. Catalog of the others (Hexagonal, MVC, Minimal) in
 > [`architectures.md`](./architectures.md).
 > Status: `draft v0.1`.
 
 ---
 
-## 1. Camadas e a Regra de Ouro
+## 1. Layers and the Golden Rule
 
-Dependências apontam **sempre para dentro**. O núcleo (`domain`) não conhece o mundo externo.
+Dependencies **always point inward**. The core (`domain`) knows nothing about the outside world.
 
 ```
 infra ──▶ adapter ──▶ usecase ──▶ domain
-(frameworks, I/O)                  (núcleo puro, sem I/O)
+(frameworks, I/O)                  (pure core, no I/O)
 ```
 
-| Camada | Pasta | O que vive aqui | Pode importar |
+| Layer | Folder | What lives here | May import |
 |---|---|---|---|
-| **Domain** | `domain/` | Entidades, value objects, domain services, **portas** (interfaces) | nada |
-| **Usecase** | `usecase/` | Orquestra regra de negócio via portas | `domain` |
+| **Domain** | `domain/` | Entities, value objects, domain services, **ports** (interfaces) | nothing |
+| **Usecase** | `usecase/` | Orchestrates business rules via ports | `domain` |
 | **Adapter** | `adapter/` | Handlers/controllers, presenters, mappers | `usecase`, `domain` |
-| **Infra** | `infra/` | Implementações concretas: DB, HTTP, filas; **impl** de Repository/Gateway | todas |
+| **Infra** | `infra/` | Concrete implementations: DB, HTTP, queues; **impl** of Repository/Gateway | all |
 
-> Ninguém importa `infra`. O `main`/injeção de dependência (composition root) é quem
-> liga as implementações concretas às portas.
+> Nobody imports `infra`. The `main`/dependency injection (composition root) is what
+> wires the concrete implementations to the ports.
 
-## 2. Persistência vs. mundo externo: Repository ≠ Gateway
+## 2. Persistence vs. the outside world: Repository ≠ Gateway
 
-Ambos são **portas** definidas no `domain` e **implementados** na `infra`. Ambos devolvem
-**dado já consistente** (entidade de domínio) — o use_case não sabe a origem.
+Both are **ports** defined in `domain` and **implemented** in `infra`. Both return
+**already-consistent data** (a domain entity) — the use_case doesn't know the source.
 
 | | **Repository** | **Gateway** |
 |---|---|---|
-| Responsabilidade | Persistência dos **seus** dados (banco) | Falar com **sistemas externos** (APIs de terceiros, pagamento, e-mail) |
-| Exemplos de método | `save`, `findById`, `delete`, `list` | `fetchAddress`, `charge`, `sendEmail` |
-| Por que separado | Contrato, motivo de mudança e modo de falha diferentes — evita o *fat repository* |
+| Responsibility | Persistence of **your** data (database) | Talking to **external systems** (third-party APIs, payment, email) |
+| Example methods | `save`, `findById`, `delete`, `list` | `fetchAddress`, `charge`, `sendEmail` |
+| Why separate | Different contract, reason to change, and failure mode — avoids the *fat repository* |
 
-### Pode morar dentro de Repository/Gateway (impl, na infra)
-- I/O (SQL, HTTP), serialização, retries, cache, paginação.
-- **Mapping**: traduzir linha crua / JSON → entidade de domínio. *Desejável* — o domínio nunca vê dado cru.
+### May live inside Repository/Gateway (impl, in infra)
+- I/O (SQL, HTTP), serialization, retries, cache, pagination.
+- **Mapping**: translate raw row / JSON → domain entity. *Desirable* — the domain never sees raw data.
 
-### NÃO pode (a Vader avisa)
-- Regra de negócio, decisão, orquestração, cálculo de domínio → isso é `usecase`/`domain`.
-- Regra prática: "normalizar/mapear formato" = ok aqui. "Aplicar regra de negócio" = não.
+### May NOT (Vader warns you)
+- Business rule, decision, orchestration, domain calculation → that's `usecase`/`domain`.
+- Practical rule: "normalize/map format" = ok here. "Apply a business rule" = no.
 
-## 3. Regras fiscalizadas pelo compilador
+## 3. Rules enforced by the compiler
 
-Severidade: 🔴 **erro** barra o build · 🟡 **warning** não barra.
+Severity: 🔴 **error** blocks the build · 🟡 **warning** does not block.
 
-| # | Regra | Severidade |
+| # | Rule | Severity |
 |---|---|---|
-| R1 | Camada interna importa externa (ex.: `domain` → `infra`) | 🔴 erro |
-| R2 | `usecase` faz I/O direto (http/sql) em vez de usar porta | 🔴 erro |
-| R3 | `domain` importa pacote de I/O (net/http, driver de banco) | 🔴 erro |
-| R4 | `usecase` importa `adapter` ou `infra` | 🔴 erro |
-| R5 | use_case/service declarado dentro de `domain/` | 🟡 warning |
-| R6 | Repository/Gateway contém regra de negócio | 🟡 warning |
-| R7 | Nomeação/local fora do padrão (ex.: arquivo em `usecase/` sem papel claro) | 🟡 warning |
-| R8 | Entidade de domínio exposta com dado cru (sem mapping no boundary) | 🟡 warning |
+| R1 | An inner layer imports an outer one (e.g.: `domain` → `infra`) | 🔴 error |
+| R2 | `usecase` does direct I/O (http/sql) instead of using a port | 🔴 error |
+| R3 | `domain` imports an I/O package (net/http, database driver) | 🔴 error |
+| R4 | `usecase` imports `adapter` or `infra` | 🔴 error |
+| R5 | use_case/service declared inside `domain/` | 🟡 warning |
+| R6 | Repository/Gateway contains a business rule | 🟡 warning |
+| R7 | Off-pattern naming/location (e.g.: a file in `usecase/` with no clear role) | 🟡 warning |
+| R8 | Domain entity exposed with raw data (no mapping at the boundary) | 🟡 warning |
 
-> Severidades são o padrão; um futuro `vader.toml` poderá ajustar caso a caso.
+> The severities are the defaults; a future `vader.toml` will be able to adjust them case by case.
 
-## 4. Como a Vader sabe o "papel" de cada arquivo
+## 4. How Vader knows each file's "role"
 
-Pela **convenção de pastas** que o `vader new` gera. A pasta declara a camada e as
-regras se aplicam por camada. (Evolução futura possível: anotação explícita de papel.)
+By the **folder convention** that `vader new` generates. The folder declares the layer and the
+rules apply per layer. (Possible future evolution: explicit role annotation.)
 
-## 5. Árvore gerada por `vader new api <nome>` (preview)
+## 5. Tree generated by `vader new api <name>` (preview)
 
 ```
-meu-api/
-├── vader.toml                  # config do projeto
+my-api/
+├── vader.toml                  # project config
 ├── cmd/
-│   └── main.vd                 # composition root (liga portas → impl)
+│   └── main.vd                 # composition root (wires ports → impl)
 ├── domain/
-│   ├── user.vd                 # entidade
-│   ├── user_test.vd            # teste (auto-gerado)
-│   ├── user_repository.vd      # PORTA de persistência (interface)
-│   └── address_gateway.vd      # PORTA de serviço externo (interface)
+│   ├── user.vd                 # entity
+│   ├── user_test.vd            # test (auto-generated)
+│   ├── user_repository.vd      # persistence PORT (interface)
+│   └── address_gateway.vd      # external-service PORT (interface)
 ├── usecase/
 │   ├── create_user.vd
-│   └── create_user_test.vd     # teste (auto-gerado)
+│   └── create_user_test.vd     # test (auto-generated)
 ├── adapter/
 │   └── http/
-│       ├── user_handler.vd     # controller HTTP
+│       ├── user_handler.vd     # HTTP controller
 │       └── user_handler_test.vd
 └── infra/
     ├── db/
-    │   └── user_repository_pg.vd   # IMPL do repository (Postgres)
+    │   └── user_repository_pg.vd   # repository IMPL (Postgres)
     └── http/
-        └── address_gateway_http.vd # IMPL do gateway (API externa)
+        └── address_gateway_http.vd # gateway IMPL (external API)
 ```
 
-Cada arquivo de função nasce com seu `*_test.vd` espelho — TDD por padrão.
+Each function file is born with its mirror `*_test.vd` — TDD by default.

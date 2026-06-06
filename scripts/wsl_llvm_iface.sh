@@ -8,7 +8,7 @@ cargo test --quiet 2>&1 | grep -E 'test result|FAILED' | head -3
 BIN="$PWD/target/debug/vader"
 echo "=== vader llvm examples/interfaces.vd ==="
 "$BIN" llvm examples/interfaces.vd 2>&1 | tail -6
-echo "=== reconfirma basics/shapes/slices ==="
+echo "=== reconfirm basics/shapes/slices ==="
 "$BIN" llvm examples/basics.vd 2>&1 | tail -2
 "$BIN" llvm examples/shapes.vd 2>&1 | tail -2
 "$BIN" llvm examples/slices.vd 2>&1 | tail -3

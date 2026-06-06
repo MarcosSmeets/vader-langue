@@ -1,4 +1,4 @@
-// shapes.vd — tipos-soma (enum) + pattern matching.
+// shapes.vd — sum types (enum) + pattern matching.
 
 public enum Shape {
     Circle(radius float)

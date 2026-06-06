@@ -1,51 +1,51 @@
-# Vader — Distribuição, VSCode e Docker (plano)
+# Vader — Distribution, VSCode, and Docker (plan)
 
-> Como as pessoas vão **instalar/usar** a Vader, ter **extensão no VSCode**, e fazer
-> **deploy via Docker**. Plano; ainda não implementado. Status: `draft`.
+> How people will **install/use** Vader, get the **VSCode extension**, and do
+> **deployment via Docker**. A plan; not yet implemented. Status: `draft`.
 
 ---
 
-## 1. Distribuição (como as pessoas instalam e usam)
+## 1. Distribution (how people install and use it)
 
-O compilador `vader` é um binário Rust. Caminhos de distribuição:
+The `vader` compiler is a Rust binary. Distribution paths:
 
-- **Binários pré-compilados** por plataforma (linux/mac/windows), via **GitHub Releases**
-  (`cargo build --release` + cross-compile). Usuário baixa e põe no PATH.
-- **Script de install** estilo rustup: `curl -fsSL https://.../install.sh | sh` (baixa o
-  binário certo pro SO/arch).
-- **Gerenciadores**: Homebrew (`brew install vader`), Scoop/winget (Windows),
-  `cargo install vader` (se publicar no crates.io), depois apt/AUR.
-- **Versionamento**: semver, `vader --version`, `vader upgrade`.
+- **Pre-compiled binaries** per platform (linux/mac/windows), via **GitHub Releases**
+  (`cargo build --release` + cross-compile). The user downloads it and puts it on the PATH.
+- **Install script** rustup-style: `curl -fsSL https://.../install.sh | sh` (downloads the
+  right binary for the OS/arch).
+- **Package managers**: Homebrew (`brew install vader`), Scoop/winget (Windows),
+  `cargo install vader` (if published on crates.io), later apt/AUR.
+- **Versioning**: semver, `vader --version`, `vader upgrade`.
 
-⚠️ **Hoje há uma dependência: o backend transpila pra Go**, então o usuário precisa do
-**Go instalado**. Isso some quando o **backend LLVM** (Fase 3) ficar pronto: aí o `vader`
-vira um toolchain **autossuficiente** (binário único, sem Go). → distribuição fica limpa
-**depois do LLVM**.
+⚠️ **Today there is one dependency: the backend transpiles to Go**, so the user needs
+**Go installed**. This goes away when the **LLVM backend** (Phase 3) is ready: then `vader`
+becomes a **self-sufficient** toolchain (single binary, no Go). → distribution gets clean
+**after LLVM**.
 
-## 2. Extensão do VSCode
+## 2. VSCode extension
 
-Três camadas, da mais fácil pra mais poderosa — e cada uma **reaproveita o que já existe**:
+Three layers, from easiest to most powerful — and each one **reuses what already exists**:
 
-1. **Syntax highlighting** (rápido, sem compilador) — uma gramática TextMate
-   (`vader.tmLanguage.json`): keywords, tipos, strings, comentários. Entrega visual imediata.
-2. **Language Server (LSP)** — o pulo do gato. Já temos **lexer + parser + checker com
-   erros em linha:coluna** e **`vader fmt`**: é exatamente o que um LSP precisa. Plano:
-   adicionar um modo `vader lsp` (fala o Language Server Protocol por stdio) que:
-   - publica **diagnósticos** (erros de tipo + lint de arquitetura) ao salvar/editar — já computamos isso;
-   - depois: hover, go-to-definition, autocomplete;
-   - **format on save** → chama `vader fmt`.
-3. **Extensão VSCode** (TypeScript) — registra a linguagem `.vd` + a gramática e sobe o
-   cliente LSP conectando no `vader lsp`. Publica no **Marketplace**.
+1. **Syntax highlighting** (quick, no compiler) — a TextMate grammar
+   (`vader.tmLanguage.json`): keywords, types, strings, comments. Immediate visual payoff.
+2. **Language Server (LSP)** — the killer move. We already have a **lexer + parser + checker with
+   line:column errors** and **`vader fmt`**: that's exactly what an LSP needs. Plan:
+   add a `vader lsp` mode (speaks the Language Server Protocol over stdio) that:
+   - publishes **diagnostics** (type errors + architecture lint) on save/edit — we already compute this;
+   - later: hover, go-to-definition, autocomplete;
+   - **format on save** → calls `vader fmt`.
+3. **VSCode extension** (TypeScript) — registers the `.vd` language + the grammar and brings up the
+   LSP client connecting to `vader lsp`. Publish to the **Marketplace**.
 
-> Ordem sugerida: (1) highlighting → (2) `vader lsp` reusando o checker → (3) extensão cliente.
+> Suggested order: (1) highlighting → (2) `vader lsp` reusing the checker → (3) client extension.
 
 ## 3. Docker
 
-Dois usos, e o primeiro é **trunfo da Vader** (compila pra binário estático):
+Two uses, and the first is **a Vader trump card** (compiles to a static binary):
 
-### a) Deploy de apps feitos em Vader (imagem minúscula)
-O `vader build` gera um **binário ELF statically-linked** (já comprovado). Então a imagem
-pode ser `scratch`/distroless de poucos MB:
+### a) Deploying apps built in Vader (tiny image)
+`vader build` produces a **statically-linked ELF binary** (already proven). So the image
+can be `scratch`/distroless, just a few MB:
 
 ```dockerfile
 # build
@@ -54,68 +54,68 @@ WORKDIR /app
 COPY . .
 RUN vader build .
 
-# runtime (imagem mínima)
+# runtime (minimal image)
 FROM scratch
-COPY --from=build /app/<projeto>/<projeto> /app
+COPY --from=build /app/<project>/<project> /app
 ENTRYPOINT ["/app"]
 ```
 
-Ideia: o `vader new` pode **gerar o Dockerfile + .dockerignore** junto do projeto
-(encaixa no diferencial de scaffolding).
+Idea: `vader new` could **generate the Dockerfile + .dockerignore** along with the project
+(fits the scaffolding differentiator).
 
-### b) Distribuir o toolchain via Docker
-Uma imagem `vader` (com vader + go por enquanto) pra usar o compilador sem instalar nada:
-`docker run --rm -v $PWD:/app vader build .`. Bom pra CI.
+### b) Distributing the toolchain via Docker
+A `vader` image (with vader + go for now) to use the compiler without installing anything:
+`docker run --rm -v $PWD:/app vader build .`. Good for CI.
 
-> Depois do LLVM, a imagem do toolchain fica menor (sem Go) e o app-image continua mínima.
+> After LLVM, the toolchain image gets smaller (no Go) and the app-image stays minimal.
 
-## Ordem recomendada
+## Recommended order
 
-1. **Backend LLVM** (próxima sessão) — remove a dependência do Go e destrava distribuição limpa.
-2. **VSCode**: highlighting → `vader lsp` (reusa o checker) → extensão.
-3. **Docker**: `vader new` gera Dockerfile; imagem do toolchain pra CI.
-4. **Distribuição**: releases + script de install + Homebrew/winget.
+1. **LLVM backend** (next session) — removes the Go dependency and unlocks clean distribution.
+2. **VSCode**: highlighting → `vader lsp` (reuses the checker) → extension.
+3. **Docker**: `vader new` generates a Dockerfile; toolchain image for CI.
+4. **Distribution**: releases + install script + Homebrew/winget.
 
 ---
 
-# Implementação — estado atual (jun/2026)
+# Implementation — current state (jun/2026)
 
-LLVM pronto (toolchain autossuficiente, sem Go), então a distribuição ficou limpa.
+LLVM ready (self-sufficient toolchain, no Go), so distribution got clean.
 
-## Instalar o compilador
+## Installing the compiler
 
-### A partir do fonte (funciona hoje)
-Precisa de Rust (`cargo`) e, pro backend nativo, `clang`.
+### From source (works today)
+Needs Rust (`cargo`) and, for the native backend, `clang`.
 ```bash
-./install.sh                 # cargo build --release + instala em ~/.local/bin
-# ou: VADER_BINDIR=/usr/local/bin ./install.sh
+./install.sh                 # cargo build --release + installs into ~/.local/bin
+# or: VADER_BINDIR=/usr/local/bin ./install.sh
 vader version
 ```
 
-### A partir de releases (quando houver repo GitHub)
-- **Linux/macOS:** baixe o binário da release, `chmod +x`, mova pro PATH.
-- **Homebrew:** `brew install SEU-USUARIO/tap/vader` (`packaging/homebrew/vader.rb`).
+### From releases (once there's a GitHub repo)
+- **Linux/macOS:** download the release binary, `chmod +x`, move it to the PATH.
+- **Homebrew:** `brew install YOUR-USERNAME/tap/vader` (`packaging/homebrew/vader.rb`).
 - **Windows (winget):** `winget install Marco.Vader` (`packaging/winget/`).
 
-## Publicar releases (cross-platform)
-`.github/workflows/release.yml` compila Linux/macOS(x64+arm64)/Windows e anexa os binários
-ao dar push numa tag:
+## Publishing releases (cross-platform)
+`.github/workflows/release.yml` compiles Linux/macOS(x64+arm64)/Windows and attaches the binaries
+when you push a tag:
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
 ```
-Depois preencha os `sha256` no Homebrew e gere os manifestos winget.
+Then fill in the `sha256` values in Homebrew and generate the winget manifests.
 
-## Extensão VS Code
-- Uso/instalação: `editors/vscode/README.md`
-- **Publicar no Marketplace:** `editors/vscode/PUBLISHING.md`
+## VS Code extension
+- Usage/installation: `editors/vscode/README.md`
+- **Publishing to the Marketplace:** `editors/vscode/PUBLISHING.md`
 
-## Estado honesto
+## Honest state
 
-| Item | Estado |
+| Item | State |
 |---|---|
-| `vader version` + `install.sh` (do fonte) | ✅ testado (Linux/WSL) |
-| Binário Linux x86_64 (`cargo build --release`) | ✅ |
-| Binários macOS / Windows | ⬜ só via o workflow (precisa repo GitHub) |
-| Workflow de release | ✅ escrito, ⬜ não rodado (sem repo) |
-| Homebrew / winget | ✅ templates, ⬜ precisam de release publicada |
-| Extensão pronta pro Marketplace | ✅ (falta `publisher` real + `vsce publish`) |
+| `vader version` + `install.sh` (from source) | ✅ tested (Linux/WSL) |
+| Linux x86_64 binary (`cargo build --release`) | ✅ |
+| macOS / Windows binaries | ⬜ only via the workflow (needs a GitHub repo) |
+| Release workflow | ✅ written, ⬜ not run (no repo) |
+| Homebrew / winget | ✅ templates, ⬜ need a published release |
+| Extension ready for the Marketplace | ✅ (still needs a real `publisher` + `vsce publish`) |

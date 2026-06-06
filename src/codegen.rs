@@ -1,10 +1,10 @@
-//! Backend: transpila a AST da Vader para código-fonte Go.
+//! Backend: transpiles the Vader AST into Go source code.
 //!
-//! Incremento 1: funções, métodos, structs, statements, expressões, `print`/`error`.
-//! Incremento 2: enum (-> interface + structs), `match` (-> switch) em posição de
-//! statement, interfaces, genéricos (-> generics do Go) e canais.
+//! Increment 1: functions, methods, structs, statements, expressions, `print`/`error`.
+//! Increment 2: enum (-> interface + structs), `match` (-> switch) in statement
+//! position, interfaces, generics (-> Go generics) and channels.
 //!
-//! Constrói `package main` e só importa `fmt`/`errors` quando usados.
+//! Builds `package main` and only imports `fmt`/`errors` when they are used.
 
 use std::collections::HashMap;
 
@@ -15,13 +15,13 @@ struct Gen {
     indent: usize,
     uses_fmt: bool,
     uses_errors: bool,
-    /// nome da variante de enum -> nomes dos campos (em ordem)
+    /// enum variant name -> field names (in order)
     variants: HashMap<String, Vec<String>>,
-    /// quando true, injeta `__cov("fn")` na entrada de cada função (modo `vader test`).
+    /// when true, injects `__cov("fn")` at the entry of each function (`vader test` mode).
     coverage: bool,
 }
 
-/// Chave de cobertura de uma função (métodos viram `Tipo.metodo`).
+/// Coverage key for a function (methods become `Type.method`).
 fn fn_key(f: &Function) -> String {
     match &f.receiver {
         Some(r) => format!("{}.{}", type_base(&r.ty), f.name),
@@ -42,7 +42,7 @@ enum MatchMode {
     Stmt,
 }
 
-/// Gera código Go a partir de um programa Vader já parseado (e idealmente checado).
+/// Generates Go code from an already-parsed (and ideally checked) Vader program.
 pub fn generate(program: &Program) -> Result<String, String> {
     let mut variants = HashMap::new();
     for item in &program.items {
@@ -68,7 +68,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
             Item::Struct(s) => g.gen_struct(s)?,
             Item::Interface(it) => g.gen_interface(it)?,
             Item::Enum(e) => g.gen_enum(e)?,
-            // blocos `test` não entram no binário (são para `vader test`).
+            // `test` blocks are not included in the binary (they are for `vader test`).
             Item::Test(_) => {}
         }
     }
@@ -96,8 +96,8 @@ pub fn generate(program: &Program) -> Result<String, String> {
     Ok(format!("{}{}", header, g.out))
 }
 
-/// Gera um programa Go que roda os blocos `test`, reporta ✓/✗, imprime a cobertura
-/// de funções e (se `gate`) sai com código != 0 quando a cobertura < `min_cov`.
+/// Generates a Go program that runs the `test` blocks, reports ✓/✗, prints the
+/// function coverage and (if `gate`) exits with a non-zero code when coverage < `min_cov`.
 pub fn generate_tests(program: &Program, gate: bool, min_cov: f64) -> Result<String, String> {
     let mut variants = HashMap::new();
     for item in &program.items {
@@ -116,7 +116,7 @@ pub fn generate_tests(program: &Program, gate: bool, min_cov: f64) -> Result<Str
         coverage: true,
     };
 
-    // Declarações do usuário (pulando o `main` e os blocos `test`).
+    // User declarations (skipping `main` and the `test` blocks).
     let mut all_fns = Vec::new();
     for item in &program.items {
         match item {
@@ -134,7 +134,7 @@ pub fn generate_tests(program: &Program, gate: bool, min_cov: f64) -> Result<Str
         }
     }
 
-    // Cada `test` vira uma func __test_N.
+    // Each `test` becomes a __test_N func.
     let mut test_names = Vec::new();
     for item in &program.items {
         if let Item::Test(t) = item {
@@ -229,7 +229,7 @@ impl Gen {
         }
     }
 
-    /// Parâmetros de tipo Go: `[T any, U Constraint]`. Vazio se não houver.
+    /// Go type parameters: `[T any, U Constraint]`. Empty if there are none.
     fn go_type_params(&self, tps: &[TypeParam]) -> Result<String, String> {
         if tps.is_empty() {
             return Ok(String::new());
@@ -285,9 +285,9 @@ impl Gen {
 
     fn gen_enum(&mut self, e: &EnumDef) -> Result<(), String> {
         if !e.type_params.is_empty() {
-            return Err("backend: enums genéricos ainda não suportados".into());
+            return Err("backend: generic enums are not supported yet".into());
         }
-        // Interface marcadora + uma struct por variante implementando-a.
+        // Marker interface + one struct per variant implementing it.
         self.line(&format!("type {} interface {{ is{}() }}", e.name, e.name));
         for v in &e.variants {
             self.line(&format!("type {} struct {{", v.name));
@@ -369,7 +369,7 @@ impl Gen {
                 decls,
                 values,
             } => {
-                // `Type name = match ... { }` -> declara e atribui via switch.
+                // `Type name = match ... { }` -> declares and assigns via switch.
                 if !is_const && decls.len() == 1 && values.len() == 1 {
                     if let ExprKind::Match { scrutinee, arms } = &values[0].kind {
                         let ty = self.go_type(&decls[0].ty)?;
@@ -480,7 +480,7 @@ impl Gen {
         mode: MatchMode,
     ) -> Result<(), String> {
         if arms.iter().any(|a| a.guard.is_some()) {
-            return Err("backend: guardas em `match` ainda não suportadas".into());
+            return Err("backend: guards in `match` are not supported yet".into());
         }
         let is_type_switch = arms
             .iter()
@@ -587,8 +587,8 @@ impl Gen {
                     self.line(&format!("for {0} := {1}; {0} <= {2}; {0}++ {{", var, l, r));
                 }
                 _ => {
-                    // range sobre canal (1 valor). Iteração de slice por elemento
-                    // precisa de info de tipo e fica para um incremento futuro.
+                    // range over channel (1 value). Iterating a slice element by
+                    // element needs type info and is left for a future increment.
                     let it = self.gen_expr(iter)?;
                     self.line(&format!("for {} := range {} {{", var, it));
                     suppress = Some(var.clone());
@@ -642,7 +642,7 @@ impl Gen {
                     BinOp::Div => "/",
                     BinOp::Rem => "%",
                     BinOp::Range | BinOp::RangeIncl => {
-                        return Err("backend: range fora de um `for` não é suportado".into())
+                        return Err("backend: range outside a `for` is not supported".into())
                     }
                 };
                 format!("({} {} {})", self.gen_expr(left)?, o, self.gen_expr(right)?)
@@ -669,7 +669,7 @@ impl Gen {
             ExprKind::Recv(inner) => format!("<-{}", self.gen_expr(inner)?),
             ExprKind::Match { .. } => {
                 return Err(
-                    "backend: `match` só é suportado em posição de return/atribuição/statement"
+                    "backend: `match` is only supported in return/assignment/statement position"
                         .into(),
                 )
             }
@@ -677,7 +677,7 @@ impl Gen {
     }
 
     fn gen_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<String, String> {
-        // Construção de canal: chan[T](buffer) -> make(chan T, buffer)
+        // Channel construction: chan[T](buffer) -> make(chan T, buffer)
         if let ExprKind::Index { base, index } = &callee.kind {
             if let ExprKind::Ident(b) = &base.kind {
                 if b == "chan" {
@@ -710,7 +710,7 @@ impl Gen {
                 self.uses_errors = true;
                 return Ok(format!("errors.New({})", arg_strs.join(", ")));
             }
-            // Construção de variante de enum: Circle(2.0) -> Circle{radius: 2.0}
+            // Enum variant construction: Circle(2.0) -> Circle{radius: 2.0}
             if let Some(field_names) = self.variants.get(name).cloned() {
                 let mut parts = Vec::new();
                 for (fname, astr) in field_names.iter().zip(arg_strs.iter()) {

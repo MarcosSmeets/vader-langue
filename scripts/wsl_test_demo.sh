@@ -5,12 +5,12 @@ cd /mnt/c/Users/marco/Documents/workspace/side_projects/vader || exit 1
 cargo build --quiet
 BIN="$PWD/target/debug/vader"
 
-echo "########## 1) vader test sem gate (arquivo solto) ##########"
+echo "########## 1) vader test without gate (loose file) ##########"
 "$BIN" test examples/calc.vd
 echo "exit code: $?"
 
 echo
-echo "########## 2) com vader.toml exigindo 80% (gate liga) ##########"
+echo "########## 2) with vader.toml requiring 80% (gate turns on) ##########"
 DEMO=/tmp/vader_test_gate
 rm -rf "$DEMO"; mkdir -p "$DEMO"; cp examples/calc.vd "$DEMO/calc.vd"
 cat > "$DEMO/vader.toml" <<'EOF'
@@ -23,4 +23,4 @@ min_coverage  = 80
 EOF
 cd "$DEMO" || exit 1
 "$BIN" test calc.vd
-echo "exit code: $?  (!= 0 => git push seria bloqueado)"
+echo "exit code: $?  (!= 0 => git push would be blocked)"

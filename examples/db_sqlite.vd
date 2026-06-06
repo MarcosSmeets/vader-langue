@@ -1,4 +1,4 @@
-// Persistência real com SQLite embarcado — zero instalação, binário self-contained.
+// Real persistence with embedded SQLite — zero install, self-contained binary.
 import "std/db"
 
 public fn main() {

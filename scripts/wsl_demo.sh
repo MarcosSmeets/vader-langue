@@ -9,8 +9,8 @@ cargo run --quiet -- run examples/basics.vd
 echo "=== vader build examples/hello.vd ==="
 cargo run --quiet -- build examples/hello.vd
 
-echo "=== executando o binario nativo ./hello ==="
+echo "=== running the native binary ./hello ==="
 ./hello
 
-echo "=== tipo do arquivo ==="
+echo "=== file type ==="
 file hello

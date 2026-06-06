@@ -1,8 +1,8 @@
-//! `vader migrate`: migrations versionadas (arquivos SQL).
+//! `vader migrate`: versioned migrations (SQL files).
 //!
-//! v1 (honesto): `new`/`gen` geram arquivos, `status` lista, `up`/`down` rastreiam
-//! localmente e MOSTRAM o SQL. A **execução contra um banco real** depende dos
-//! drivers (`std/db`), que ainda estão em construção.
+//! v1 (honest): `new`/`gen` generate files, `status` lists, `up`/`down` track
+//! locally and SHOW the SQL. **Execution against a real database** depends on the
+//! drivers (`std/db`), which are still under construction.
 
 use std::fs;
 
@@ -43,8 +43,8 @@ pub fn new_migration(name: &str) -> Result<(), String> {
     let base = format!("{:04}_{}", next_seq(), slug(name));
     let up = format!("{}/{}.up.sql", DIR, base);
     let down = format!("{}/{}.down.sql", DIR, base);
-    fs::write(&up, "-- SQL de subida\n").map_err(|e| e.to_string())?;
-    fs::write(&down, "-- SQL de reversão\n").map_err(|e| e.to_string())?;
+    fs::write(&up, "-- up SQL\n").map_err(|e| e.to_string())?;
+    fs::write(&down, "-- down SQL\n").map_err(|e| e.to_string())?;
     println!("created {}\ncreated {}", up, down);
     Ok(())
 }
@@ -61,7 +61,7 @@ fn sql_type(t: &Type) -> &'static str {
     }
 }
 
-/// Gera uma migration a partir das entidades (structs) do projeto. Revise antes!
+/// Generates a migration from the project's entities (structs). Review first!
 pub fn gen(name: &str) -> Result<(), String> {
     let program = module::load(".", false)?;
     ensure_dir()?;
@@ -70,7 +70,7 @@ pub fn gen(name: &str) -> Result<(), String> {
     for item in &program.items {
         if let Item::Struct(s) = item {
             if s.fields.is_empty() {
-                continue; // pula tipos sem campos (ex.: Conn da stdlib)
+                continue; // skip types without fields (e.g. stdlib's Conn)
             }
             let table = format!("{}s", slug(&s.name));
             up.push_str(&format!("create table {} (\n", table));
@@ -85,14 +85,14 @@ pub fn gen(name: &str) -> Result<(), String> {
         }
     }
     if up.is_empty() {
-        return Err("nenhum struct encontrado para gerar migration".into());
+        return Err("no struct found to generate a migration".into());
     }
     let base = format!("{:04}_{}", next_seq(), slug(name));
     let upf = format!("{}/{}.up.sql", DIR, base);
     let downf = format!("{}/{}.down.sql", DIR, base);
     fs::write(&upf, &up).map_err(|e| e.to_string())?;
     fs::write(&downf, &down).map_err(|e| e.to_string())?;
-    println!("gerado das entidades (revise antes de aplicar):\n  {}\n  {}", upf, downf);
+    println!("generated from entities (review before applying):\n  {}\n  {}", upf, downf);
     Ok(())
 }
 
@@ -123,22 +123,22 @@ fn set_applied(list: &[String]) -> Result<(), String> {
 pub fn status() -> Result<(), String> {
     let all = migrations();
     if all.is_empty() {
-        println!("(nenhuma migration — crie com `vader migrate new <nome>`)");
+        println!("(no migrations — create one with `vader migrate new <name>`)");
         return Ok(());
     }
     let app = applied();
     for m in &all {
         let mark = if app.contains(m) {
-            "\u{2713} aplicada"
+            "\u{2713} applied"
         } else {
-            "\u{25CB} pendente"
+            "\u{25CB} pending"
         };
         println!("  {} {}", mark, m);
     }
     Ok(())
 }
 
-/// Migrations ainda não aplicadas, em ordem.
+/// Migrations not yet applied, in order.
 pub fn pending() -> Vec<String> {
     let app = applied();
     migrations()
@@ -147,17 +147,17 @@ pub fn pending() -> Vec<String> {
         .collect()
 }
 
-/// SQL de subida de uma migration.
+/// Up SQL of a migration.
 pub fn up_sql(name: &str) -> String {
     fs::read_to_string(format!("{}/{}.up.sql", DIR, name)).unwrap_or_default()
 }
 
-/// SQL de reversão de uma migration.
+/// Down SQL of a migration.
 pub fn down_sql(name: &str) -> String {
     fs::read_to_string(format!("{}/{}.down.sql", DIR, name)).unwrap_or_default()
 }
 
-/// Marca uma migration como aplicada (rastreamento local em `migrations/.applied`).
+/// Marks a migration as applied (local tracking in `migrations/.applied`).
 pub fn mark_applied(name: &str) -> Result<(), String> {
     let mut app = applied();
     if !app.iter().any(|m| m == name) {
@@ -166,14 +166,14 @@ pub fn mark_applied(name: &str) -> Result<(), String> {
     set_applied(&app)
 }
 
-/// Remove uma migration do rastreamento de aplicadas.
+/// Removes a migration from the applied tracking.
 pub fn unmark(name: &str) -> Result<(), String> {
     let mut app = applied();
     app.retain(|m| m != name);
     set_applied(&app)
 }
 
-/// Última migration aplicada (alvo do `down`).
+/// Last applied migration (target of `down`).
 pub fn last_applied() -> Option<String> {
     applied().pop()
 }

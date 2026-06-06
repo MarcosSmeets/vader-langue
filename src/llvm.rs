@@ -1,15 +1,15 @@
-//! Backend LLVM (Fase 3): transpila a AST para **LLVM IR em texto** (`.ll`),
-//! compilado pelo `clang` para binário nativo — sem Go.
+//! LLVM backend (Phase 3): transpiles the AST into **LLVM IR as text** (`.ll`),
+//! compiled by `clang` into a native binary — no Go.
 //!
-//! Cobertura (subset sequencial): funções, métodos, multi-retorno; tipos int/bool/
-//! float/string/error/struct; aritmética/comparação/lógicos; if/for; recursão;
-//! strings (literal/concat/comparação) e `print` com vários argumentos.
+//! Coverage (sequential subset): functions, methods, multi-return; int/bool/
+//! float/string/error/struct types; arithmetic/comparison/logical; if/for; recursion;
+//! strings (literal/concat/comparison) and `print` with multiple arguments.
 //!
-//! Ainda NÃO suportado (precisa de runtime ou é o próximo passo): canais/goroutines,
-//! maps, slices, interfaces (vtables), genéricos (monomorfização), enum/match.
-//! Memória de strings/structs vaza (sem GC) — alinhado com a visão sem-GC.
+//! NOT yet supported (needs a runtime or is the next step): channels/goroutines,
+//! maps, slices, interfaces (vtables), generics (monomorphization), enum/match.
+//! String/struct memory leaks (no GC) — aligned with the GC-less vision.
 //!
-//! Locais usam alloca/load/store; tudo nomeado (`%tN`, `bbN`).
+//! Locals use alloca/load/store; everything is named (`%tN`, `bbN`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -23,34 +23,35 @@ struct Gen {
     str_count: usize,
     terminated: bool,
     cur_ret: String,
-    vars: HashMap<String, (String, String)>, // nome -> (alloca, lltype)
-    structs: HashMap<String, Vec<(String, String)>>, // struct -> [(campo, lltype)]
-    enums: HashMap<String, ()>,                       // nomes de enums
-    variants: HashMap<String, (String, usize, Vec<(String, String)>)>, // variante -> (enum, tag, campos)
-    funcs: HashMap<String, (Vec<String>, String)>,           // função -> (params, ret)
-    methods: HashMap<(String, String), (Vec<String>, String)>, // (struct, método) -> (params, ret)
-    /// interface -> [(método, tipos dos params, ret)]
+    vars: HashMap<String, (String, String)>, // name -> (alloca, lltype)
+    structs: HashMap<String, Vec<(String, String)>>, // struct -> [(field, lltype)]
+    enums: HashMap<String, ()>,                       // enum names
+    variants: HashMap<String, (String, usize, Vec<(String, String)>)>, // variant -> (enum, tag, fields)
+    funcs: HashMap<String, (Vec<String>, String)>,           // function -> (params, ret)
+    methods: HashMap<(String, String), (Vec<String>, String)>, // (struct, method) -> (params, ret)
+    /// interface -> [(method, param types, ret)]
     interfaces: HashMap<String, Vec<(String, Vec<String>, String)>>,
-    /// funções genéricas (templates), por nome
+    /// generic functions (templates), by name
     generics: HashMap<String, Function>,
-    /// substituição de type params ativa durante a geração de uma instância
+    /// type-param substitution active during the generation of an instance
     type_subst: HashMap<String, String>,
-    /// instâncias já geradas (nomes mangled)
+    /// instances already generated (mangled names)
     mono_done: HashSet<String>,
-    /// instâncias a gerar: (nome mangled, template, substituição)
+    /// instances to generate: (mangled name, template, substitution)
     pending: Vec<(String, Function, HashMap<String, String>)>,
-    /// variáveis de canal -> tipo LLVM do elemento (canal em si é i8* opaco)
+    /// channel variables -> LLVM type of the element (the channel itself is an opaque i8*)
     chan_elems: HashMap<String, String>,
-    /// variáveis de map -> (chave é string?, tipo LLVM do valor)
+    /// map variables -> (is the key a string?, LLVM type of the value)
     map_types: HashMap<String, (bool, String)>,
-    /// thunks de goroutine a gerar: (nome, função alvo, tipos dos args)
+    /// goroutine thunks to generate: (name, target function, arg types)
     pending_thunks: Vec<(String, String, Vec<String>)>,
     thunk_count: usize,
-    /// projeto importa `std/db`? (habilita o despacho das intrínsecas do driver)
+    /// does the project import `std/db`? (enables dispatching the driver intrinsics)
     has_db: bool,
     has_http: bool,
     has_json: bool,
     has_mem: bool,
+    has_env: bool,
     needs: Needs,
 }
 
@@ -67,6 +68,7 @@ struct Needs {
     http: bool,
     json: bool,
     mem: bool,
+    env: bool,
 }
 
 enum MatchMode {
@@ -75,7 +77,7 @@ enum MatchMode {
     Stmt,
 }
 
-/// Gera LLVM IR (texto) a partir de um programa Vader já checado.
+/// Generates LLVM IR (text) from an already-checked Vader program.
 pub fn generate(program: &Program) -> Result<String, String> {
     let mut g = Gen {
         out: String::new(),
@@ -104,10 +106,11 @@ pub fn generate(program: &Program) -> Result<String, String> {
         has_http: program.imports.iter().any(|i| i.starts_with("std/http")),
         has_json: program.imports.iter().any(|i| i.starts_with("std/json")),
         has_mem: program.imports.iter().any(|i| i.starts_with("std/mem")),
+        has_env: program.imports.iter().any(|i| i.starts_with("std/env")),
         needs: Needs::default(),
     };
 
-    // pré-passo 1: structs (nomes primeiro, depois campos, p/ referências cruzadas)
+    // pre-pass 1: structs (names first, then fields, for cross-references)
     for item in &program.items {
         if let Item::Struct(s) = item {
             g.structs.insert(s.name.clone(), Vec::new());
@@ -123,7 +126,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         }
     }
 
-    // enums: registra nomes e variantes (representação tagged-union {i32, i8*})
+    // enums: register names and variants (tagged-union representation {i32, i8*})
     for item in &program.items {
         if let Item::Enum(e) = item {
             g.enums.insert(e.name.clone(), ());
@@ -138,19 +141,19 @@ pub fn generate(program: &Program) -> Result<String, String> {
         }
     }
 
-    // nomes de interfaces (pro ty_of reconhecer já em pré-passo 2)
+    // interface names (so ty_of recognizes them already in pre-pass 2)
     for item in &program.items {
         if let Item::Interface(it) = item {
             g.interfaces.insert(it.name.clone(), Vec::new());
         }
     }
 
-    // pré-passo 2: assinaturas de funções, métodos e interfaces (com tipos de params)
+    // pre-pass 2: signatures of functions, methods and interfaces (with param types)
     for item in &program.items {
         match item {
             Item::Function(f) => {
                 if !f.type_params.is_empty() {
-                    // função genérica (template); monomorfizada sob demanda.
+                    // generic function (template); monomorphized on demand.
                     if f.receiver.is_none() {
                         g.generics.insert(f.name.clone(), f.clone());
                     }
@@ -199,7 +202,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         }
     }
 
-    // tipos LLVM dos structs
+    // LLVM types of the structs
     let mut typedefs = String::new();
     for item in &program.items {
         if let Item::Struct(s) = item {
@@ -238,19 +241,19 @@ pub fn generate(program: &Program) -> Result<String, String> {
             }
         }
     }
-    g.gen_impls(); // shims + vtables das implementações de interface
-    // monomorfização: gera as instâncias genéricas agendadas (pode agendar mais)
+    g.gen_impls(); // shims + vtables of the interface implementations
+    // monomorphization: generates the scheduled generic instances (may schedule more)
     while let Some((mangled, gfn, subst)) = g.pending.pop() {
         g.type_subst = subst;
         g.gen_function(&gfn, Some(&mangled))?;
         g.type_subst = HashMap::new();
     }
-    // trampolins das goroutines (spawn)
+    // goroutine trampolines (spawn)
     for (thunk, fname, argtypes) in g.pending_thunks.clone() {
         g.gen_thunk(&thunk, &fname, &argtypes);
     }
 
-    let mut result = String::from("; gerado pela Vader (backend LLVM IR)\n\n");
+    let mut result = String::from("; generated by Vader (LLVM IR backend)\n\n");
     result.push_str(&typedefs);
     if !typedefs.is_empty() {
         result.push('\n');
@@ -335,6 +338,9 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare void @vader_release(i8*)\n",
         );
     }
+    if g.needs.env {
+        result.push_str("declare i8* @vader_env_read(i8*)\n");
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -350,7 +356,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
     Ok(result)
 }
 
-/// Helper de runtime: concatena duas strings C (vaza memória; sem-GC).
+/// Runtime helper: concatenates two C strings (leaks memory; GC-less).
 const STRCAT_IR: &str = "declare i64 @strlen(i8*)
 declare i8* @strcpy(i8*, i8*)
 declare i8* @strcat(i8*, i8*)
@@ -367,10 +373,10 @@ define i8* @vader_strcat(i8* %a, i8* %b) {
 }
 ";
 
-/// Move todas as instruções `alloca` de uma função pro topo do bloco `entry`.
-/// (Allocas fora do entry, dentro de loops, vazam pilha a cada iteração.)
+/// Moves all `alloca` instructions of a function to the top of the `entry` block.
+/// (Allocas outside entry, inside loops, leak stack on every iteration.)
 fn hoist_allocas(text: &str) -> String {
-    let mut header = String::new(); // até e incluindo "entry:"
+    let mut header = String::new(); // up to and including "entry:"
     let mut allocas = String::new();
     let mut body = String::new();
     let mut seen_entry = false;
@@ -404,7 +410,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" | "Server" | "Json" | "Arena" => "i8*".to_string(), // handles opacos da stdlib
+                "DB" | "Rows" | "Server" | "Json" | "Arena" => "i8*".to_string(), // opaque stdlib handles
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -412,17 +418,17 @@ impl Gen {
                     {
                         format!("%{}", other)
                     } else {
-                        return Err(format!("backend LLVM: tipo `{}` não suportado", other));
+                        return Err(format!("LLVM backend: unsupported type `{}`", other));
                     }
                 }
             }),
             Type::Slice(inner) => Ok(format!("{{ {}*, i64 }}", self.ty_of(inner)?)),
             Type::Generic(name, _) if name == "chan" || name == "map" => Ok("i8*".to_string()),
-            _ => Err("backend LLVM: tipo genérico não suportado".into()),
+            _ => Err("LLVM backend: unsupported generic type".into()),
         }
     }
 
-    /// Extrai o tipo do elemento de um slice `{ T*, i64 }` -> `T`.
+    /// Extracts the element type of a slice `{ T*, i64 }` -> `T`.
     fn slice_elem(bt: &str) -> String {
         bt.trim_start_matches('{')
             .trim()
@@ -525,7 +531,7 @@ impl Gen {
         let ret = self.ret_type(f)?;
         self.cur_ret = ret.clone();
 
-        // nome (mangled p/ método) + params (receiver primeiro)
+        // name (mangled for a method) + params (receiver first)
         let (name, mut all_params) = match &f.receiver {
             Some(r) => {
                 let sty = self.ty_of(&r.ty)?;
@@ -559,7 +565,7 @@ impl Gen {
             self.emit(&format!("store {} %{}, {}* {}", pt, pn, pt, addr));
             self.vars.insert(pn.clone(), (addr, pt.clone()));
         }
-        // registra tipos de elemento dos params que são canais
+        // register element types of the params that are channels
         for p in &f.params {
             if let Type::Generic(n, args) = &p.ty {
                 if n == "chan" && args.len() == 1 {
@@ -587,8 +593,8 @@ impl Gen {
             }
         }
         self.out.push_str("}\n\n");
-        // hoist dos allocas pro bloco entry: dentro de loops, allocas fora do entry
-        // crescem a pilha a cada iteração (só liberam no return). Mover pro topo limita.
+        // hoist the allocas to the entry block: inside loops, allocas outside entry
+        // grow the stack on every iteration (only freed at return). Moving to the top limits this.
         let f_text = self.out.split_off(fn_begin);
         self.out.push_str(&hoist_allocas(&f_text));
         Ok(())
@@ -618,7 +624,7 @@ impl Gen {
                         .vars
                         .get(n)
                         .cloned()
-                        .ok_or(format!("backend LLVM: variável `{}` desconhecida", n))?;
+                        .ok_or(format!("LLVM backend: unknown variable `{}`", n))?;
                     let (v, _) = self.gen_expr(value)?;
                     self.emit(&format!("store {} {}, {}* {}", ty, v, ty, addr));
                     Ok(())
@@ -645,7 +651,7 @@ impl Gen {
                     self.emit(&format!("store {} {}, {}* {}", elemty, vv, elemty, ep));
                     Ok(())
                 }
-                _ => Err("backend LLVM: alvo de atribuição não suportado".into()),
+                _ => Err("LLVM backend: unsupported assignment target".into()),
             },
             Stmt::Return(values) => {
                 if values.len() == 1 {
@@ -707,12 +713,12 @@ impl Gen {
                 Ok(())
             }
             Stmt::Spawn(call) => self.gen_spawn(call),
-            Stmt::Assert(_) => Err("backend LLVM: `assert` fora de teste não suportado".into()),
+            Stmt::Assert(_) => Err("LLVM backend: `assert` outside a test is not supported".into()),
         }
     }
 
     fn gen_var_decl(&mut self, decls: &[Param], values: &[Expr]) -> Result<(), String> {
-        // multi-retorno: `int r, error e = call()`
+        // multi-return: `int r, error e = call()`
         if decls.len() > 1 && values.len() == 1 {
             let (agg, aggty) = self.gen_expr(&values[0])?;
             for (i, d) in decls.iter().enumerate() {
@@ -729,9 +735,9 @@ impl Gen {
             return Ok(());
         }
         if decls.len() != 1 || values.len() != 1 {
-            return Err("backend LLVM: declaração múltipla só a partir de chamada".into());
+            return Err("LLVM backend: multiple declaration only from a call".into());
         }
-        // map[K]V m = newmap()  -> cria o map (tipo K/V vem da declaração)
+        // map[K]V m = newmap()  -> creates the map (K/V type comes from the declaration)
         if let Type::Generic(n, args) = &decls[0].ty {
             if n == "map" && args.len() == 2 {
                 let keyisstr = matches!(&args[0], Type::Named(k) if k == "string");
@@ -792,7 +798,7 @@ impl Gen {
             self.ret(&format!("{} {}", rt, v));
             return Ok(());
         }
-        // multi-retorno: monta o agregado
+        // multi-return: builds the aggregate
         let mut cur = "undef".to_string();
         let mut vals = Vec::new();
         for v in values {
@@ -852,7 +858,7 @@ impl Gen {
                     self.label(&end_l);
                     return Ok(());
                 }
-                // iteração de canal: for x in ch  (recebe até o canal fechar)
+                // channel iteration: for x in ch  (receives until the channel closes)
                 if let ExprKind::Ident(cn) = &iter.kind {
                     if let Some(elem) = self.chan_elems.get(cn).cloned() {
                         let (cv, _) = self.gen_expr(iter)?;
@@ -888,10 +894,10 @@ impl Gen {
                         return Ok(());
                     }
                 }
-                // iteração de slice: for x in xs
+                // slice iteration: for x in xs
                 let (sv, st) = self.gen_expr(iter)?;
                 if !st.starts_with('{') {
-                    return Err("backend LLVM: for-in só sobre range ou slice".into());
+                    return Err("LLVM backend: for-in only over a range or slice".into());
                 }
                 let elemty = Self::slice_elem(&st);
                 let ptr = self.fresh();
@@ -1037,9 +1043,9 @@ impl Gen {
         let (fname, cargs) = match &call.kind {
             ExprKind::Call { callee, args } => match &callee.kind {
                 ExprKind::Ident(n) => (n.clone(), args),
-                _ => return Err("backend LLVM: spawn só de função simples".into()),
+                _ => return Err("LLVM backend: spawn only of a simple function".into()),
             },
-            _ => return Err("backend LLVM: spawn precisa de uma chamada".into()),
+            _ => return Err("LLVM backend: spawn needs a call".into()),
         };
         let mut argvals = Vec::new();
         for a in cargs {
@@ -1047,7 +1053,7 @@ impl Gen {
         }
         let argtypes: Vec<String> = argvals.iter().map(|(_, t)| t.clone()).collect();
         let structty = format!("{{ {} }}", argtypes.join(", "));
-        // empacota os args num struct no heap
+        // packs the args into a struct on the heap
         let szp = self.fresh();
         self.emit(&format!("{} = getelementptr {}, {}* null, i32 1", szp, structty, structty));
         let szi = self.fresh();
@@ -1068,7 +1074,7 @@ impl Gen {
         let thunk = format!("spawn$thunk${}", self.thunk_count);
         self.thunk_count += 1;
         self.pending_thunks.push((thunk.clone(), fname, argtypes));
-        self.needs.chan = true; // vader_go é declarado junto do runtime
+        self.needs.chan = true; // vader_go is declared together with the runtime
         self.emit(&format!(
             "call void @vader_go(i8* (i8*)* @\"{}\", i8* {})",
             thunk, raw
@@ -1076,7 +1082,7 @@ impl Gen {
         Ok(())
     }
 
-    /// Gera o trampolim de uma goroutine: desempacota os args e chama a função.
+    /// Generates a goroutine's trampoline: unpacks the args and calls the function.
     fn gen_thunk(&mut self, thunk: &str, fname: &str, argtypes: &[String]) {
         let structty = format!("{{ {} }}", argtypes.join(", "));
         self.out
@@ -1127,7 +1133,7 @@ impl Gen {
                     .vars
                     .get(n)
                     .cloned()
-                    .ok_or(format!("backend LLVM: variável `{}` desconhecida", n))?;
+                    .ok_or(format!("LLVM backend: unknown variable `{}`", n))?;
                 let t = self.fresh();
                 self.emit(&format!("{} = load {}, {}* {}", t, ty, ty, addr));
                 Ok((t, ty))
@@ -1158,20 +1164,20 @@ impl Gen {
                 let sname = bt.trim_start_matches('%').to_string();
                 let (idx, fty) = self
                     .struct_field(&sname, field)
-                    .ok_or(format!("backend LLVM: campo `{}` em `{}`", field, bt))?;
+                    .ok_or(format!("LLVM backend: field `{}` in `{}`", field, bt))?;
                 let r = self.fresh();
                 self.emit(&format!("{} = extractvalue {} {}, {}", r, bt, bv, idx));
                 Ok((r, fty))
             }
             ExprKind::StructLit { name, fields } => self.gen_struct_lit(name, fields),
             ExprKind::Index { base, index } => {
-                // lookup de map: m[k]
+                // map lookup: m[k]
                 if let ExprKind::Ident(bn) = &base.kind {
                     if let Some((keyisstr, valty)) = self.map_types.get(bn).cloned() {
                         return self.gen_map_get(base, index, keyisstr, &valty);
                     }
                 }
-                // índice de slice: s[i]
+                // slice index: s[i]
                 let (bv, bt) = self.gen_expr(base)?;
                 let (iv, _) = self.gen_expr(index)?;
                 let elemty = Self::slice_elem(&bt);
@@ -1205,7 +1211,7 @@ impl Gen {
                 self.emit(&format!("{} = load {}, {}* {}", val, elem, elem, out));
                 Ok((val, elem))
             }
-            _ => Err("backend LLVM: construção não suportada no subset".into()),
+            _ => Err("LLVM backend: construct not supported in the subset".into()),
         }
     }
 
@@ -1215,12 +1221,12 @@ impl Gen {
                 return Ok(el.clone());
             }
         }
-        Err("backend LLVM: não consegui inferir o tipo do elemento no recv".into())
+        Err("LLVM backend: could not infer the element type in recv".into())
     }
 
     fn gen_slice_lit(&mut self, elems: &[Expr]) -> Result<(String, String), String> {
         if elems.is_empty() {
-            return Err("backend LLVM: slice literal vazio precisa de tipo (subset)".into());
+            return Err("LLVM backend: empty slice literal needs a type (subset)".into());
         }
         let mut vals = Vec::new();
         for el in elems {
@@ -1229,7 +1235,7 @@ impl Gen {
         let elemty = vals[0].1.clone();
         let n = elems.len();
         let slicety = format!("{{ {}*, i64 }}", elemty);
-        // sizeof(n elementos) via getelementptr null
+        // sizeof(n elements) via getelementptr null
         let szp = self.fresh();
         self.emit(&format!(
             "{} = getelementptr {}, {}* null, i64 {}",
@@ -1278,13 +1284,13 @@ impl Gen {
             .structs
             .get(name)
             .cloned()
-            .ok_or(format!("backend LLVM: struct `{}` desconhecido", name))?;
+            .ok_or(format!("LLVM backend: unknown struct `{}`", name))?;
         let mut cur = "undef".to_string();
         for (fname, fexpr) in fields {
             let idx = def
                 .iter()
                 .position(|(n, _)| n == fname)
-                .ok_or(format!("backend LLVM: campo `{}` em `{}`", fname, name))?;
+                .ok_or(format!("LLVM backend: field `{}` in `{}`", fname, name))?;
             let (v, t) = self.gen_expr(fexpr)?;
             let fty = def[idx].1.clone();
             let v = self.coerce(v, &t, &fty);
@@ -1305,12 +1311,12 @@ impl Gen {
         right: &Expr,
     ) -> Result<(String, String), String> {
         if matches!(op, BinOp::Range | BinOp::RangeIncl) {
-            return Err("backend LLVM: range só dentro de `for`".into());
+            return Err("LLVM backend: range only inside `for`".into());
         }
         let (l, lt) = self.gen_expr(left)?;
         let (r, rt) = self.gen_expr(right)?;
         use BinOp::*;
-        // concatenação / comparação de strings
+        // string concatenation / comparison
         if lt == "i8*" && matches!(op, Add | Eq | NotEq) {
             return self.gen_string_op(op, l, r);
         }
@@ -1387,7 +1393,7 @@ impl Gen {
                 Ok((t, "i8*".to_string()))
             }
             BinOp::Eq | BinOp::NotEq => {
-                // null (nil) compara como ponteiro; senão usa strcmp
+                // null (nil) compares as a pointer; otherwise use strcmp
                 let t = self.fresh();
                 if l == "null" || r == "null" {
                     let c = if matches!(op, BinOp::Eq) { "eq" } else { "ne" };
@@ -1405,7 +1411,7 @@ impl Gen {
         }
     }
 
-    /// Intrínsecas do driver `std/db` (SQLite). Retorna `Some` se tratou o nome.
+    /// Intrinsics of the `std/db` driver (SQLite). Returns `Some` if it handled the name.
     fn gen_db_call(
         &mut self,
         name: &str,
@@ -1427,7 +1433,7 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
-    /// Intrínsecas de `std/http` (servidor + cliente).
+    /// Intrinsics of `std/http` (server + client).
     fn gen_http_call(
         &mut self,
         name: &str,
@@ -1449,7 +1455,7 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
-    /// Intrínsecas de `std/json` (parse + acessores + builder + encode).
+    /// Intrinsics of `std/json` (parse + accessors + builder + encode).
     fn gen_json_call(
         &mut self,
         name: &str,
@@ -1481,7 +1487,21 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
-    /// Intrínsecas de `std/mem` (arena/região): escopo manual pra workers.
+    /// Intrinsics of `std/env`: reading the process environment.
+    fn gen_env_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "read" => ("vader_env_read", "i8*", &["i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.env = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrinsics of `std/mem` (arena/region): manual scope for workers.
     fn gen_mem_call(
         &mut self,
         name: &str,
@@ -1496,8 +1516,8 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
-    /// Emite uma chamada a uma função externa (runtime C). Coage args (i64->i32,
-    /// i1->i32) e converte o retorno (i1<-i32 via icmp; void; senão direto).
+    /// Emits a call to an external function (C runtime). Coerces args (i64->i32,
+    /// i1->i32) and converts the return value (i1<-i32 via icmp; void; otherwise direct).
     fn emit_extern(
         &mut self,
         extern_name: &str,
@@ -1540,13 +1560,13 @@ impl Gen {
     }
 
     fn gen_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<(String, String), String> {
-        // criação de canal: chan[T](buffer) -> vader_chan_make(sizeof(T), buffer)
+        // channel creation: chan[T](buffer) -> vader_chan_make(sizeof(T), buffer)
         if let ExprKind::Index { base, index } = &callee.kind {
             if let ExprKind::Ident(b) = &base.kind {
                 if b == "chan" {
                     let elem = match &index.kind {
                         ExprKind::Ident(n) => self.ty_of(&Type::Named(n.clone()))?,
-                        _ => return Err("backend LLVM: tipo do canal inválido".into()),
+                        _ => return Err("LLVM backend: invalid channel type".into()),
                     };
                     let szp = self.fresh();
                     self.emit(&format!("{} = getelementptr {}, {}* null, i32 1", szp, elem, elem));
@@ -1570,12 +1590,12 @@ impl Gen {
         if let ExprKind::Field { base, field } = &callee.kind {
             let (bv, bt) = self.gen_expr(base)?;
             let tyname = bt.trim_start_matches('%').to_string();
-            // despacho dinâmico de interface (vtable)
+            // dynamic interface dispatch (vtable)
             if let Some(methods) = self.interfaces.get(&tyname).cloned() {
                 let idx = methods
                     .iter()
                     .position(|(m, _, _)| m == field)
-                    .ok_or(format!("backend LLVM: método `{}` na interface `{}`", field, tyname))?;
+                    .ok_or(format!("LLVM backend: method `{}` in interface `{}`", field, tyname))?;
                 let (_, params, ret) = methods[idx].clone();
                 let mut ptypes = vec!["i8*".to_string()];
                 ptypes.extend(params.clone());
@@ -1601,7 +1621,7 @@ impl Gen {
                 }
                 return self.emit_call(&ret, &mp, &argstrs);
             }
-            // método de struct
+            // struct method
             if let Some((params, ret)) =
                 self.methods.get(&(tyname.clone(), field.clone())).cloned()
             {
@@ -1613,14 +1633,14 @@ impl Gen {
                 }
                 return self.emit_call(&ret, &format!("@\"{}.{}\"", tyname, field), &argstrs);
             }
-            return Err(format!("backend LLVM: método `{}.{}` desconhecido", tyname, field));
+            return Err(format!("LLVM backend: unknown method `{}.{}`", tyname, field));
         }
 
         let name = match &callee.kind {
             ExprKind::Ident(n) => n.clone(),
-            _ => return Err("backend LLVM: chamada complexa não suportada".into()),
+            _ => return Err("LLVM backend: complex call not supported".into()),
         };
-        // intrínsecas da stdlib (têm prioridade — `close` aqui é do banco, não de canal)
+        // stdlib intrinsics (take priority — `close` here is the database's, not a channel's)
         if self.has_db {
             if let Some(r) = self.gen_db_call(&name, args)? {
                 return Ok(r);
@@ -1638,6 +1658,11 @@ impl Gen {
         }
         if self.has_mem {
             if let Some(r) = self.gen_mem_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_env {
+            if let Some(r) = self.gen_env_call(&name, args)? {
                 return Ok(r);
             }
         }
@@ -1672,7 +1697,7 @@ impl Gen {
         if let Some((ename, tag, fields)) = self.variants.get(&name).cloned() {
             return self.gen_variant_ctor(&ename, tag, &fields, args);
         }
-        // chamada de função genérica -> monomorfiza
+        // generic function call -> monomorphize
         if let Some(gfn) = self.generics.get(&name).cloned() {
             return self.gen_generic_call(&gfn, args);
         }
@@ -1680,7 +1705,7 @@ impl Gen {
             .funcs
             .get(&name)
             .cloned()
-            .ok_or(format!("backend LLVM: função `{}` desconhecida", name))?;
+            .ok_or(format!("LLVM backend: unknown function `{}`", name))?;
         let mut argstrs = Vec::new();
         for (i, a) in args.iter().enumerate() {
             let (v, t) = self.gen_expr(a)?;
@@ -1701,7 +1726,7 @@ impl Gen {
         for a in args {
             argvals.push(self.gen_expr(a)?);
         }
-        // infere a substituição T -> lltype a partir dos argumentos
+        // infers the substitution T -> lltype from the arguments
         let mut subst = HashMap::new();
         for (i, p) in gfn.params.iter().enumerate() {
             if let Some((_, at)) = argvals.get(i) {
@@ -1819,11 +1844,11 @@ impl Gen {
         mode: MatchMode,
     ) -> Result<(), String> {
         if arms.iter().any(|a| a.guard.is_some()) {
-            return Err("backend LLVM: guardas em match não suportadas".into());
+            return Err("LLVM backend: guards in match not supported".into());
         }
         let (sv, st) = self.gen_expr(scrut)?;
         if !st.starts_with('%') || !self.enums.contains_key(st.trim_start_matches('%')) {
-            return Err("backend LLVM: match só sobre enum no subset".into());
+            return Err("LLVM backend: match only over an enum in the subset".into());
         }
         let tag = self.fresh();
         self.emit(&format!("{} = extractvalue {} {}, 0", tag, st, sv));
@@ -1943,7 +1968,7 @@ impl Gen {
         Ok(())
     }
 
-    /// Gera shims + vtables: para cada struct que implementa cada interface.
+    /// Generates shims + vtables: for each struct that implements each interface.
     fn gen_impls(&mut self) {
         let ifaces: Vec<(String, Vec<(String, Vec<String>, String)>)> = self
             .interfaces
@@ -2012,7 +2037,7 @@ impl Gen {
         }
     }
 
-    /// Converte (faz "box") um struct numa interface (aloca no heap + monta fat pointer).
+    /// Converts (boxes) a struct into an interface (allocates on the heap + builds a fat pointer).
     fn box_interface(&mut self, v: String, structty: &str, ifacety: &str) -> String {
         let sname = structty.trim_start_matches('%');
         let iname = ifacety.trim_start_matches('%');
@@ -2058,7 +2083,7 @@ impl Gen {
             self.emit(&format!("{} = call i32 @puts(i8* {})", r, p));
             return Ok(("0".to_string(), "void".to_string()));
         }
-        // monta um printf com formato baseado nos tipos
+        // builds a printf with a format based on the types
         let mut specs = Vec::new();
         let mut argvals = Vec::new();
         for a in args {
@@ -2083,7 +2108,7 @@ impl Gen {
                     argvals.push(format!("i64 {}", v));
                 }
                 other => {
-                    return Err(format!("backend LLVM: `print` não suporta `{}`", other));
+                    return Err(format!("LLVM backend: `print` does not support `{}`", other));
                 }
             }
         }
@@ -2110,8 +2135,8 @@ fn type_base(t: &Type) -> String {
     }
 }
 
-/// Infere a substituição de type params casando o tipo do parâmetro (AST) com o
-/// tipo LLVM concreto do argumento. Ex.: `[]T` vs `{ i64*, i64 }` -> T = i64.
+/// Infers the type-param substitution by matching the parameter type (AST) with the
+/// concrete LLVM type of the argument. E.g.: `[]T` vs `{ i64*, i64 }` -> T = i64.
 fn unify(tparams: &HashSet<String>, t: &Type, lltype: &str, subst: &mut HashMap<String, String>) {
     match t {
         Type::Named(n) if tparams.contains(n) => {
@@ -2125,7 +2150,7 @@ fn unify(tparams: &HashSet<String>, t: &Type, lltype: &str, subst: &mut HashMap<
     }
 }
 
-/// Deixa um tipo LLVM seguro como pedaço de nome de função (`{ i64*, i64 }` -> `_i64__i64_`).
+/// Makes an LLVM type safe as a piece of a function name (`{ i64*, i64 }` -> `_i64__i64_`).
 fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -2218,13 +2243,13 @@ mod tests {
 
     #[test]
     fn compiles_basics_and_shapes_to_ir() {
-        // exemplos reais (structs/métodos/multi-retorno e enum/match) geram IR sem erro.
+        // real examples (structs/methods/multi-return and enum/match) generate IR without error.
         for src in [
             include_str!("../examples/basics.vd"),
             include_str!("../examples/shapes.vd"),
         ] {
             let prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
-            generate(&prog).unwrap_or_else(|e| panic!("falhou: {}", e));
+            generate(&prog).unwrap_or_else(|e| panic!("failed: {}", e));
         }
     }
 
