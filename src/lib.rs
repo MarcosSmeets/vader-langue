@@ -16,6 +16,7 @@ pub mod lsp;
 pub mod migrate;
 pub mod module;
 pub mod parser;
+pub mod pkg;
 pub mod scaffold;
 pub mod templates;
 pub mod token;

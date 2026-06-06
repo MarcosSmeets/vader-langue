@@ -136,6 +136,27 @@ impl Checker {
                 }
             }
         }
+        // std/db: registra as funções intrínsecas do driver quando o projeto importa.
+        // DB/Rows são handles opacos (resolvem pra Unknown, que é lenient).
+        if program.imports.iter().any(|i| i.starts_with("std/db")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 8] = [
+                ("open", vec![String], vec![Unknown]),
+                ("exec", vec![Unknown, String], vec![Error]),
+                ("query", vec![Unknown, String], vec![Unknown]),
+                ("next", vec![Unknown], vec![Bool]),
+                ("col_int", vec![Unknown, Int], vec![Int]),
+                ("col_text", vec![Unknown, Int], vec![String]),
+                ("col_float", vec![Unknown, Int], vec![Float]),
+                ("close", vec![Unknown], vec![]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions
+                    .entry(name.to_string())
+                    .or_insert(FnSig { params, returns });
+            }
+        }
+
         // Pass 3: check bodies.
         for item in &program.items {
             match item {

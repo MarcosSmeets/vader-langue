@@ -12,10 +12,15 @@ use std::process::{Command, ExitCode};
 
 /// Runtime de concorrência (C), embutido no binário e linkado pelo clang quando há canais.
 const RUNTIME_C: &str = include_str!("../runtime/vader_rt.c");
+/// SQLite (amalgamation, domínio público) + wrapper, embutidos e linkados quando usa `std/db`.
+const SQLITE_C: &str = include_str!("../runtime/sqlite/sqlite3.c");
+const SQLITE_H: &str = include_str!("../runtime/sqlite/sqlite3.h");
+const VADER_DB_C: &str = include_str!("../runtime/vader_db.c");
 
 use vader::ast::Program;
 use vader::{
-    check, codegen, formatter, gen, lexer, lint, llvm, migrate, module, parser, scaffold, templates,
+    check, codegen, formatter, gen, lexer, lint, llvm, migrate, module, parser, pkg, scaffold,
+    templates,
 };
 
 fn usage() {
@@ -31,6 +36,8 @@ fn usage() {
     eprintln!("  vader fmt [-w] <file.vd>   format (stdout, or -w to rewrite the file)");
     eprintln!("  vader lint <file.vd> [--arch <arch>]   check architecture rules");
     eprintln!("  vader migrate <new|gen|status|up|down> [name]   manage SQL migrations");
+    eprintln!("  vader add <git-url|path>[@version] [name]   add a dependency (git/URL)");
+    eprintln!("  vader remove <name>        remove a dependency");
     eprintln!("  vader test <file.vd>       run test blocks + coverage report");
     eprintln!("       --min-coverage <n>  override the gate threshold");
     eprintln!("       --no-gate           do not fail on low coverage");
@@ -77,6 +84,12 @@ fn main() -> ExitCode {
     if args.get(1).map(String::as_str) == Some("lsp") {
         vader::lsp::run();
         return ExitCode::SUCCESS;
+    }
+    if args.get(1).map(String::as_str) == Some("add") {
+        return cmd_add(&args);
+    }
+    if args.get(1).map(String::as_str) == Some("remove") {
+        return cmd_remove(&args);
     }
     if args.get(1).map(String::as_str) == Some("fmt") {
         return cmd_fmt(&args);
@@ -228,6 +241,81 @@ fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode
     }
 }
 
+/// `vader add <git-url|path>[@version] [name]` — adiciona uma dependência (git/URL).
+fn cmd_add(args: &[String]) -> ExitCode {
+    let src = match args.get(2) {
+        Some(s) => s,
+        None => {
+            eprintln!("usage: vader add <git-url|path>[@version] [name]");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (url, version) = pkg::split_source(src);
+    let name = args.get(3).cloned().unwrap_or_else(|| pkg::derive_name(&url));
+    let dep = pkg::Dep {
+        name: name.clone(),
+        url: url.clone(),
+        version: version.clone(),
+    };
+
+    println!("buscando `{}` de {}...", name, url);
+    let commit = match pkg::fetch(&dep) {
+        Ok((_dir, c)) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let toml = std::fs::read_to_string("vader.toml").unwrap_or_default();
+    let mut deps = pkg::parse_deps(&toml);
+    deps.retain(|d| d.name != name);
+    deps.push(dep);
+    if let Err(e) = std::fs::write("vader.toml", pkg::write_deps(&toml, &deps)) {
+        eprintln!("error: cannot write vader.toml: {}", e);
+        return ExitCode::FAILURE;
+    }
+    write_lock(&deps);
+    let short = &commit[..commit.len().min(10)];
+    let vshown = if version.is_empty() { "default" } else { &version };
+    println!("added `{}` ({}@{}) -> {}", name, url, vshown, short);
+    ExitCode::SUCCESS
+}
+
+/// `vader remove <name>` — remove uma dependência do `vader.toml`.
+fn cmd_remove(args: &[String]) -> ExitCode {
+    let name = match args.get(2) {
+        Some(s) => s,
+        None => {
+            eprintln!("usage: vader remove <name>");
+            return ExitCode::FAILURE;
+        }
+    };
+    let toml = std::fs::read_to_string("vader.toml").unwrap_or_default();
+    let mut deps = pkg::parse_deps(&toml);
+    let before = deps.len();
+    deps.retain(|d| &d.name != name);
+    if deps.len() == before {
+        eprintln!("`{}` não está nas dependências", name);
+        return ExitCode::FAILURE;
+    }
+    let _ = std::fs::write("vader.toml", pkg::write_deps(&toml, &deps));
+    write_lock(&deps);
+    println!("removed `{}`", name);
+    ExitCode::SUCCESS
+}
+
+/// Regenera o `vader.lock` com os commits resolvidos de cada dependência.
+fn write_lock(deps: &[pkg::Dep]) {
+    let mut out = String::from("# vader.lock — gerado automaticamente; commits resolvidos\n");
+    for d in deps {
+        if let Ok((_p, commit)) = pkg::fetch(d) {
+            out.push_str(&format!("{} = \"{}@{}\"\n", d.name, d.url, commit));
+        }
+    }
+    let _ = std::fs::write("vader.lock", out);
+}
+
 /// `vader llvm <file.vd>` — Vader -> LLVM IR (texto) -> clang -> binário nativo -> roda.
 fn cmd_llvm(args: &[String]) -> ExitCode {
     let path = match args.get(2) {
@@ -251,13 +339,22 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let program = match parser::parse(tokens) {
+    let mut program = match parser::parse(tokens) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{}", e);
             return ExitCode::FAILURE;
         }
     };
+    // normaliza qualificadores de pacote (ex.: `db.open` -> `open`) como nos builds de diretório
+    if !program.imports.is_empty() {
+        let packages: std::collections::HashSet<String> = program
+            .imports
+            .iter()
+            .filter_map(|i| i.rsplit('/').next().map(|s| s.to_string()))
+            .collect();
+        module::normalize(&mut program, &packages);
+    }
     if let Err(errors) = check::check(&program) {
         for e in &errors {
             eprintln!("type error at {}:{}: {}", e.line, e.col, e.message);
@@ -297,6 +394,45 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
         }
         cmd.arg(&rt).arg("-lpthread");
         println!("(linkando runtime de concorrência)");
+    }
+    // se o IR usa o driver de banco (std/db), compila o SQLite uma vez (cache do .o) e linka
+    if ir.contains("@vader_db_") {
+        let hdr = dir.join("sqlite3.h");
+        let obj = dir.join("sqlite3.o");
+        if std::fs::write(&hdr, SQLITE_H).is_err() {
+            eprintln!("error: cannot write sqlite3.h");
+            return ExitCode::FAILURE;
+        }
+        if !obj.exists() {
+            let src = dir.join("sqlite3.c");
+            if std::fs::write(&src, SQLITE_C).is_err() {
+                eprintln!("error: cannot write sqlite3.c");
+                return ExitCode::FAILURE;
+            }
+            println!("(compilando SQLite embarcado — só na primeira vez)");
+            let st = Command::new("clang")
+                .arg("-c")
+                .arg("-O2")
+                .arg(&src)
+                .arg("-o")
+                .arg(&obj)
+                .current_dir(&dir)
+                .status();
+            match st {
+                Ok(s) if s.success() => {}
+                _ => {
+                    eprintln!("clang falhou ao compilar o SQLite");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        let db_c = dir.join("vader_db.c");
+        if std::fs::write(&db_c, VADER_DB_C).is_err() {
+            eprintln!("error: cannot write vader_db.c");
+            return ExitCode::FAILURE;
+        }
+        cmd.arg(&obj).arg(&db_c).arg("-lpthread").arg("-ldl").arg("-lm");
+        println!("(linkando SQLite embarcado)");
     }
     cmd.arg("-o").arg(&bin);
     let compile = cmd.status();

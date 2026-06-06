@@ -46,6 +46,8 @@ struct Gen {
     /// thunks de goroutine a gerar: (nome, função alvo, tipos dos args)
     pending_thunks: Vec<(String, String, Vec<String>)>,
     thunk_count: usize,
+    /// projeto importa `std/db`? (habilita o despacho das intrínsecas do driver)
+    has_db: bool,
     needs: Needs,
 }
 
@@ -58,6 +60,7 @@ struct Needs {
     malloc: bool,
     chan: bool,
     map: bool,
+    db: bool,
 }
 
 enum MatchMode {
@@ -91,6 +94,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         map_types: HashMap::new(),
         pending_thunks: Vec::new(),
         thunk_count: 0,
+        has_db: program.imports.iter().any(|i| i.starts_with("std/db")),
         needs: Needs::default(),
     };
 
@@ -267,6 +271,18 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare void @vader_go(i8* (i8*)*, i8*)\n",
         );
     }
+    if g.needs.db {
+        result.push_str(
+            "declare i8* @vader_db_open(i8*)\n\
+             declare i8* @vader_db_exec(i8*, i8*)\n\
+             declare i8* @vader_db_query(i8*, i8*)\n\
+             declare i32 @vader_db_next(i8*)\n\
+             declare i64 @vader_db_col_int(i8*, i32)\n\
+             declare double @vader_db_col_float(i8*, i32)\n\
+             declare i8* @vader_db_col_text(i8*, i32)\n\
+             declare void @vader_db_close(i8*)\n",
+        );
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -307,6 +323,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
+                "DB" | "Rows" => "i8*".to_string(), // handles opacos do std/db
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -1302,6 +1319,57 @@ impl Gen {
         }
     }
 
+    /// Intrínsecas do driver `std/db` (SQLite). Retorna `Some` se tratou o nome.
+    fn gen_db_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        // (extern, ret lltype, tipos dos params C)
+        let (extern_name, ret, ptys): (&str, &str, &[&str]) = match name {
+            "open" => ("vader_db_open", "i8*", &["i8*"]),
+            "exec" => ("vader_db_exec", "i8*", &["i8*", "i8*"]),
+            "query" => ("vader_db_query", "i8*", &["i8*", "i8*"]),
+            "next" => ("vader_db_next", "i1", &["i8*"]),
+            "col_int" => ("vader_db_col_int", "i64", &["i8*", "i32"]),
+            "col_float" => ("vader_db_col_float", "double", &["i8*", "i32"]),
+            "col_text" => ("vader_db_col_text", "i8*", &["i8*", "i32"]),
+            "close" => ("vader_db_close", "void", &["i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.db = true;
+        let mut argstrs = Vec::new();
+        for (i, a) in args.iter().enumerate() {
+            let (v, t) = self.gen_expr(a)?;
+            let pty = ptys.get(i).copied().unwrap_or("i8*");
+            // índice de coluna: Vader int (i64) -> i32 do C
+            let v = if t == "i64" && pty == "i32" {
+                let r = self.fresh();
+                self.emit(&format!("{} = trunc i64 {} to i32", r, v));
+                r
+            } else {
+                v
+            };
+            argstrs.push(format!("{} {}", pty, v));
+        }
+        let joined = argstrs.join(", ");
+        // `next` retorna i32 no C; trunca pra i1 (bool) p/ usar no `for`
+        if name == "next" {
+            let r = self.fresh();
+            self.emit(&format!("{} = call i32 @{}({})", r, extern_name, joined));
+            let b = self.fresh();
+            self.emit(&format!("{} = icmp ne i32 {}, 0", b, r));
+            return Ok(Some((b, "i1".to_string())));
+        }
+        if ret == "void" {
+            self.emit(&format!("call void @{}({})", extern_name, joined));
+            return Ok(Some(("0".to_string(), "void".to_string())));
+        }
+        let r = self.fresh();
+        self.emit(&format!("{} = call {} @{}({})", r, ret, extern_name, joined));
+        Ok(Some((r, ret.to_string())))
+    }
+
     fn gen_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<(String, String), String> {
         // criação de canal: chan[T](buffer) -> vader_chan_make(sizeof(T), buffer)
         if let ExprKind::Index { base, index } = &callee.kind {
@@ -1383,6 +1451,12 @@ impl Gen {
             ExprKind::Ident(n) => n.clone(),
             _ => return Err("backend LLVM: chamada complexa não suportada".into()),
         };
+        // intrínsecas do std/db (têm prioridade — `close` aqui é do banco, não de canal)
+        if self.has_db {
+            if let Some(r) = self.gen_db_call(&name, args)? {
+                return Ok(r);
+            }
+        }
         if name == "print" {
             return self.gen_print(args);
         }
@@ -1905,6 +1979,32 @@ mod tests {
         let out = ir("fn d(a, b int): (int, error) { return a, nil }");
         assert!(out.contains("define { i64, i8* } @d"));
         assert!(out.contains("insertvalue"));
+    }
+
+    #[test]
+    fn emits_sqlite_driver() {
+        use crate::module;
+        use std::collections::HashSet;
+        let src = "import \"std/db\"\n\
+                   public fn main() {\n\
+                   DB c = db.open(\"x.db\")\n\
+                   db.exec(c, \"CREATE TABLE t (id INTEGER)\")\n\
+                   Rows r = db.query(c, \"SELECT id FROM t\")\n\
+                   for db.next(r) {\n\
+                   int id = db.col_int(r, 0)\n\
+                   print(id)\n\
+                   }\n\
+                   db.close(c)\n\
+                   }";
+        let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
+        let pkgs: HashSet<String> = ["db".to_string()].into_iter().collect();
+        module::normalize(&mut prog, &pkgs);
+        let out = generate(&prog).unwrap();
+        assert!(out.contains("declare i8* @vader_db_open(i8*)"));
+        assert!(out.contains("call i8* @vader_db_open"));
+        assert!(out.contains("call i8* @vader_db_query"));
+        assert!(out.contains("call i64 @vader_db_col_int"));
+        assert!(out.contains("call void @vader_db_close"));
     }
 
     #[test]

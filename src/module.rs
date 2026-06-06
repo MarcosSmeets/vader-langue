@@ -22,9 +22,22 @@ pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
     if files.is_empty() {
         return Err(format!("no .vd files under `{}`", dir));
     }
+    // dependências do `vader.toml`: faz fetch (git clone no cache) e injeta os `.vd`
+    let mut dep_packages: Vec<String> = Vec::new();
+    if let Ok(toml) = std::fs::read_to_string(Path::new(dir).join("vader.toml")) {
+        for d in crate::pkg::parse_deps(&toml) {
+            let (dep_path, _commit) = crate::pkg::fetch(&d)?;
+            dep_packages.push(d.name.clone());
+            gather(&dep_path, false, &mut files)?;
+        }
+    }
+
     files.sort();
 
     let mut packages: HashSet<String> = HashSet::new();
+    for p in dep_packages {
+        packages.insert(p); // nome da dep = pacote pro `import`/normalização
+    }
     for f in &files {
         if let Some(parent) = f.parent().and_then(|p| p.file_name()) {
             packages.insert(parent.to_string_lossy().to_string());

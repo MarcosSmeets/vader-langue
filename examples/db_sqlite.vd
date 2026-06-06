@@ -1,0 +1,20 @@
+// Persistência real com SQLite embarcado — zero instalação, binário self-contained.
+import "std/db"
+
+public fn main() {
+    DB conn = db.open("/tmp/vader_demo.db")
+
+    db.exec(conn, "CREATE TABLE IF NOT EXISTS users (id INTEGER, name TEXT)")
+    db.exec(conn, "DELETE FROM users")
+    db.exec(conn, "INSERT INTO users VALUES (1, 'Marco')")
+    db.exec(conn, "INSERT INTO users VALUES (2, 'Vader')")
+
+    Rows rows = db.query(conn, "SELECT id, name FROM users ORDER BY id")
+    for db.next(rows) {
+        int id = db.col_int(rows, 0)
+        string name = db.col_text(rows, 1)
+        print(id, name)
+    }
+
+    db.close(conn)
+}

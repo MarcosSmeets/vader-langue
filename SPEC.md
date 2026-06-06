@@ -145,8 +145,16 @@ pra LLVM mexe só na última caixa.
 - [x] `vader gen` (fn/struct/usecase/handler) ✅
 - [x] Checagem de convenções de arquitetura (`vader lint` + auto no build/check, ruleset por arquitetura) ✅
 - [x] `vader migrate` (new/gen/status/up/down) — gera SQL das entidades, rastreia local
-- [ ] **Drivers de banco REAIS** (postgres/mysql/sqlite/mongo) + execução das migrations — precisa de build via go.mod + rede (não feito nesta sessão)
-- [ ] Gerenciador de pacotes (`add`/`publish`) + **registro central** — registro é infra hospedada (não feito nesta sessão)
+- [x] **Driver REAL de SQLite** — `import "std/db"`: `sqlite3.c` (amalgamation, domínio público)
+      embarcado e linkado pelo clang no backend nativo. API `open/exec/query/next/col_int/col_text/col_float/close`.
+      **Zero instalação, binário self-contained.** `examples/db_sqlite.vd` roda (persiste em arquivo). Cache do `.o`.
+- [ ] Drivers REAIS de Postgres/MySQL (wire protocol por TCP) + Mongo — próxima fase
+- [ ] Execução das migrations (hoje só gera SQL)
+- [x] **Gerenciador de pacotes (git/URL)** — `vader add <git-url|path>[@versão]` / `vader remove`:
+      `git clone` num cache (`~/.vader/pkg`), `[dependencies]` no `vader.toml` + `vader.lock`
+      (commit pinado). `module::load` faz fetch e injeta os `.vd` da dep no projeto. **Verificado
+      end-to-end** (dep git local → `check`/`run`). `src/pkg.rs`.
+- [ ] **Registro central** hospedado (`vader publish` + index) — infra hospedada; git/URL já cobre o essencial
 
 ### Robustez (em andamento)
 - [x] Posições (linha:coluna) nos erros do type checker
@@ -178,8 +186,9 @@ pra LLVM mexe só na última caixa.
       `~/.local/bin`). **Testado**: binário instalado roda standalone (runtime embutido).
 - [x] **Templates de release** — `.github/workflows/release.yml` (Linux/macOS×2/Windows),
       `packaging/homebrew/vader.rb`, `packaging/winget/`. Prontos; precisam de repo GitHub.
-- [x] **Extensão pronta pro Marketplace** — `package.json` com repository/license/keywords,
-      LICENSE, guia `editors/vscode/PUBLISHING.md` (publisher + PAT + `vsce publish`).
+- [x] **Extensão PUBLICADA no Marketplace** — `Vader.vader` v0.3.0 no ar
+      (marketplace.visualstudio.com/items?itemName=Vader.vader): highlighting + LSP +
+      geração no botão direito. Guia em `editors/vscode/PUBLISHING.md`; `.vscodeignore` enxuga o pacote.
 - [ ] Imagem Docker do toolchain (app-image já: `vader new` gera Dockerfile).
 
 ## 10. Decisões em aberto (não bloqueiam Fase 0)
