@@ -55,6 +55,12 @@
         "path": "./syntaxes/vader.tmLanguage.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "vader",
+        "path": "./snippets/vader.json"
+      }
+    ],
     "configuration": {
       "title": "Vader",
       "properties": {
