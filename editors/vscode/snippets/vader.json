@@ -227,5 +227,47 @@
       "string ${4:out} = json.encode(${1:obj})"
     ],
     "description": "Build and encode a JSON object (std/json)"
+  },
+
+  "http router app": {
+    "prefix": "router",
+    "body": [
+      "import \"std/http\"",
+      "",
+      "public fn ${1:listUsers}(s Server) {",
+      "\thttp.respond(s, 200, \"${2:text/plain}\", \"${3:ok}\")",
+      "}",
+      "",
+      "public fn main() {",
+      "\tRouter ${4:r} = newRouter()",
+      "\t${4:r}.${5|get,post,put,delete,patch|}(\"${6:/users}\", ${1:listUsers})",
+      "\tserve(${7:8080}, ${4:r})",
+      "}"
+    ],
+    "description": "Full HTTP router app (std/http): handler + route + serve"
+  },
+  "route handler": {
+    "prefix": "handlerfn",
+    "body": [
+      "public fn ${1:name}(s Server) {",
+      "\thttp.respond(s, ${2:200}, \"${3:application/json}\", ${4:body})",
+      "}"
+    ],
+    "description": "HTTP route handler — fn(s Server)"
+  },
+  "register route": {
+    "prefix": "route",
+    "body": ["${1:r}.${2|get,post,put,delete,patch|}(\"${3:/path}\", ${4:handler})"],
+    "description": "Register a route on a Router (get/post/put/delete/patch)"
+  },
+  "new router": {
+    "prefix": "newrouter",
+    "body": ["Router ${1:r} = newRouter()"],
+    "description": "Create a Router"
+  },
+  "serve router": {
+    "prefix": "serve",
+    "body": ["serve(${1:8080}, ${2:r})"],
+    "description": "Start the HTTP server for a Router"
   }
 }

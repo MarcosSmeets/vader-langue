@@ -150,6 +150,12 @@ const STD_MODULES = {
   },
 };
 
+// Global builtins (no module prefix) that still need a stdlib import.
+const STD_GLOBALS = [
+  { name: "newRouter", sig: "newRouter(): Router", args: [], path: "std/http" },
+  { name: "serve", sig: "serve(port int, r Router)", args: ["port", "r"], path: "std/http" },
+];
+
 function registerStdCompletion(context) {
   const provider = {
     provideCompletionItems(document, position) {
@@ -159,8 +165,11 @@ function registerStdCompletion(context) {
         const mod = STD_MODULES[member[1]];
         return mod.items.map((it) => memberItem(document, member[1], mod, it));
       }
-      // Not after a known module: offer the module names (auto-import on accept).
-      return Object.keys(STD_MODULES).map((alias) => moduleItem(document, alias));
+      // Not after a known module: offer module names + global builtins (auto-import on accept).
+      return [
+        ...Object.keys(STD_MODULES).map((alias) => moduleItem(document, alias)),
+        ...STD_GLOBALS.map((g) => globalItem(document, g)),
+      ];
     },
   };
   context.subscriptions.push(
@@ -185,6 +194,17 @@ function moduleItem(document, alias) {
   item.detail = `Vader stdlib — import "${mod.path}"`;
   item.documentation = "Inserts the import automatically when accepted.";
   const edit = importEdit(document, mod.path);
+  if (edit) item.additionalTextEdits = [edit];
+  return item;
+}
+
+function globalItem(document, g) {
+  const item = new CompletionItem(g.name, CompletionItemKind.Function);
+  item.detail = g.sig;
+  item.documentation = `Vader builtin — import "${g.path}"`;
+  const params = g.args.map((a, i) => `\${${i + 1}:${a}}`).join(", ");
+  item.insertText = new SnippetString(`${g.name}(${params})`);
+  const edit = importEdit(document, g.path);
   if (edit) item.additionalTextEdits = [edit];
   return item;
 }

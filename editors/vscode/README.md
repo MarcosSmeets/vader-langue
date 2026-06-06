@@ -5,7 +5,8 @@ What it gives you:
 2. **Language Server** — real-time parse and type errors, reusing the
    compiler (`vader lsp`). Requires the `vader` binary and an `npm install`.
 3. **Snippets** — `pfn`, `fn`, `struct`, `interface`, `enum`, `match`, `iferr`,
-   `for…`, `test`, `usecase`, `handler`, and stdlib starters (`httpserver`,
+   `for…`, `test`, `usecase`, `handler`; HTTP router (`router`, `route`,
+   `handlerfn`, `newrouter`, `serve`); and stdlib starters (`httpserver`,
    `dbquery`, `jsonbuild`). Type a prefix and press Tab.
 4. **Stdlib completion with auto-import** — type `db.`, `http.`, `json.` or
    `mem.` to complete the built-in functions; accepting one inserts the matching
