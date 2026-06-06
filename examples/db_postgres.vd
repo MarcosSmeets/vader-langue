@@ -1,0 +1,21 @@
+// Postgres pela rede — mesmo API do SQLite, só muda o DSN.
+// Requer um Postgres rodando (ex.: postgres://postgres:vader123@127.0.0.1:5432/vaderdb).
+import "std/db"
+
+public fn main() {
+    DB conn = db.open("postgres://postgres:vader123@127.0.0.1:5432/vaderdb")
+
+    db.exec(conn, "DROP TABLE IF EXISTS users")
+    db.exec(conn, "CREATE TABLE users (id INTEGER, name TEXT)")
+    db.exec(conn, "INSERT INTO users VALUES (1, 'Marco')")
+    db.exec(conn, "INSERT INTO users VALUES (2, 'Vader')")
+
+    Rows rows = db.query(conn, "SELECT id, name FROM users ORDER BY id")
+    for db.next(rows) {
+        int id = db.col_int(rows, 0)
+        string name = db.col_text(rows, 1)
+        print(id, name)
+    }
+
+    db.close(conn)
+}

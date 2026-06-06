@@ -16,6 +16,8 @@ const RUNTIME_C: &str = include_str!("../runtime/vader_rt.c");
 const SQLITE_C: &str = include_str!("../runtime/sqlite/sqlite3.c");
 const SQLITE_H: &str = include_str!("../runtime/sqlite/sqlite3.h");
 const VADER_DB_C: &str = include_str!("../runtime/vader_db.c");
+/// Driver Postgres (wire protocol puro: TCP + auth SCRAM + simple query).
+const VADER_PG_C: &str = include_str!("../runtime/vader_pg.c");
 
 use vader::ast::Program;
 use vader::{
@@ -427,12 +429,19 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
             }
         }
         let db_c = dir.join("vader_db.c");
-        if std::fs::write(&db_c, VADER_DB_C).is_err() {
-            eprintln!("error: cannot write vader_db.c");
+        let pg_c = dir.join("vader_pg.c");
+        if std::fs::write(&db_c, VADER_DB_C).is_err() || std::fs::write(&pg_c, VADER_PG_C).is_err()
+        {
+            eprintln!("error: cannot write db runtime");
             return ExitCode::FAILURE;
         }
-        cmd.arg(&obj).arg(&db_c).arg("-lpthread").arg("-ldl").arg("-lm");
-        println!("(linkando SQLite embarcado)");
+        cmd.arg(&obj)
+            .arg(&db_c)
+            .arg(&pg_c)
+            .arg("-lpthread")
+            .arg("-ldl")
+            .arg("-lm");
+        println!("(linkando SQLite embarcado + driver Postgres)");
     }
     cmd.arg("-o").arg(&bin);
     let compile = cmd.status();
