@@ -1,0 +1,16 @@
+// slices.vd — slices no backend LLVM: literal, índice, len, iteração.
+
+fn sum(xs []int): int {
+    int total = 0
+    for x in xs {
+        total = total + x
+    }
+    return total
+}
+
+fn main() {
+    []int nums = [10, 20, 30]
+    print(sum(nums))   // 60
+    print(nums[1])     // 20
+    print(len(nums))   // 3
+}

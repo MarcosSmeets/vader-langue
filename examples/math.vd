@@ -1,0 +1,12 @@
+// math.vd — função comum...
+
+fn add(a, b int): int {
+    return a + b
+}
+
+fn divide(a, b int): (int, error) {
+    if b == 0 {
+        return 0, error("division by zero")
+    }
+    return a / b, nil
+}

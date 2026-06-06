@@ -1,0 +1,27 @@
+// llvm_demo.vd — subset que o backend LLVM (Fase 3, v1) compila pra binário nativo.
+
+fn add(a, b int): int {
+    return a + b
+}
+
+fn fib(n int): int {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn sum_to(n int): int {
+    int total = 0
+    for i in 1..=n {
+        total = total + i
+    }
+    return total
+}
+
+fn main() {
+    print("LLVM backend vivo!")
+    print(add(2, 3))
+    print(fib(10))
+    print(sum_to(100))
+}

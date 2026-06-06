@@ -1,0 +1,5 @@
+// hello.vd — o menor programa Vader possível.
+
+fn main() {
+    print("Hello, Vader!")
+}

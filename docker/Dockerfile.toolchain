@@ -1,0 +1,23 @@
+# Imagem do toolchain Vader: compila o compilador e deixa clang + Go prontos,
+# então funcionam tanto `vader llvm` (backend nativo) quanto `vader build` (Go).
+#
+# Build:  docker build -f docker/Dockerfile.toolchain -t vader-toolchain .
+# Uso:    docker run --rm -v "$PWD":/work vader-toolchain build .
+#         docker run --rm -v "$PWD":/work vader-toolchain llvm examples/maps.vd
+
+FROM rust:1-bookworm AS build
+WORKDIR /src
+# zero dependências externas -> cargo build é rápido e offline
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY runtime ./runtime
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clang golang-go ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/vader /usr/local/bin/vader
+WORKDIR /work
+ENTRYPOINT ["vader"]
+CMD ["version"]

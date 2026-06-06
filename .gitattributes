@@ -1,0 +1,3 @@
+# Mantém LF em todos os arquivos de texto (scripts .sh rodam no WSL/CI;
+# consistência cross-platform). Evita CRLF quebrando shebangs.
+* text=auto eol=lf

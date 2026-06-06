@@ -1,0 +1,5 @@
+target/
+.git/
+**/node_modules/
+*.vsix
+editors/vscode/node_modules/

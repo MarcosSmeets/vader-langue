@@ -1,0 +1,16 @@
+// generics_demo.vd — funções genéricas monomorfizadas no backend LLVM.
+
+fn id[T](x T): T {
+    return x
+}
+
+fn first[T](xs []T): T {
+    return xs[0]
+}
+
+fn main() {
+    print(id(42))          // 42  (instancia id$i64)
+
+    []int nums = [7, 8, 9]
+    print(first(nums))     // 7   (instancia first$i64)
+}

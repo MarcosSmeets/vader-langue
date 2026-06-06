@@ -1,0 +1,8 @@
+/target
+# binários gerados pelo `vader build`
+/hello
+/basics
+# dependências/artefatos da extensão
+**/node_modules/
+*.vsix
+editors/vscode/package-lock.json

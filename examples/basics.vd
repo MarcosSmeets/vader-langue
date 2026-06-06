@@ -1,0 +1,47 @@
+// basics.vd — variáveis, funções, structs, erros explícitos.
+
+// Tipagem forte e explícita: o tipo vem na frente (estilo C).
+// Sem let/var/mut, sem inferência. Reatribuição não repete o tipo.
+fn demo() {
+    string name   = "Vader"
+    int    count  = 0
+    bool   active = true
+    float  ratio  = 1.5
+
+    count = count + 1
+    print(name, count, active, ratio)
+
+    const int MAX_RETRIES = 3
+    print(MAX_RETRIES)
+}
+
+// Erros são explícitos (estilo Go): nada de exception escondida.
+// `public` exporta a função; sem modificador o padrão é `private`.
+public fn divide(a, b int): (int, error) {
+    if b == 0 {
+        return 0, error("division by zero")
+    }
+    return a / b, nil
+}
+
+// Structs + métodos.
+public struct User {
+    id   int
+    name string
+}
+
+public fn (u User) greeting(): string {
+    return "Hi, " + u.name
+}
+
+fn main() {
+    User user = User{ id: 1, name: "Marco" }
+    print(user.greeting())
+
+    int result, error err = divide(10, 2)
+    if err != nil {
+        print("error:", err)
+        return
+    }
+    print("result:", result)
+}

@@ -1,0 +1,23 @@
+// shapes.vd — tipos-soma (enum) + pattern matching.
+
+public enum Shape {
+    Circle(radius float)
+    Rectangle(width float, height float)
+    Point
+}
+
+public fn area(s Shape): float {
+    return match s {
+        Circle(r):       3.14159 * r * r
+        Rectangle(w, h): w * h
+        Point:           0.0
+    }
+}
+
+public fn main() {
+    Shape c = Circle(2.0)
+    print(area(c))
+
+    Shape r = Rectangle(3.0, 4.0)
+    print(area(r))
+}

@@ -1,0 +1,79 @@
+{
+  "name": "vader",
+  "displayName": "Vader Language",
+  "description": "Syntax highlighting + Language Server + geração de código (scaffolding) para a linguagem Vader.",
+  "version": "0.3.0",
+  "publisher": "SEU-PUBLISHER-ID",
+  "license": "MIT",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["vader", "language", "compiler", "lsp", "syntax-highlighting"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MarcosSmeets/vader-langue.git"
+  },
+  "bugs": { "url": "https://github.com/MarcosSmeets/vader-langue/issues" },
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:vader"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "vader",
+        "aliases": ["Vader", "vader"],
+        "extensions": [".vd"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vader",
+        "scopeName": "source.vader",
+        "path": "./syntaxes/vader.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Vader",
+      "properties": {
+        "vader.serverPath": {
+          "type": "string",
+          "default": "vader",
+          "description": "Caminho do executável `vader` usado como language server (`vader lsp`). Use um caminho absoluto se não estiver no PATH."
+        },
+        "vader.enableLanguageServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Liga o language server (diagnósticos em tempo real). Desligue para usar só o realce de sintaxe."
+        }
+      }
+    },
+    "commands": [
+      { "command": "vader.gen.struct", "title": "Gerar Struct", "category": "Vader" },
+      { "command": "vader.gen.usecase", "title": "Gerar Use Case", "category": "Vader" },
+      { "command": "vader.gen.handler", "title": "Gerar Handler", "category": "Vader" },
+      { "command": "vader.gen.fn", "title": "Gerar Função", "category": "Vader" }
+    ],
+    "submenus": [{ "id": "vader.genMenu", "label": "Vader: Gerar" }],
+    "menus": {
+      "explorer/context": [{ "submenu": "vader.genMenu", "group": "2_workspace" }],
+      "editor/context": [
+        {
+          "submenu": "vader.genMenu",
+          "group": "1_modification",
+          "when": "editorLangId == vader"
+        }
+      ],
+      "vader.genMenu": [
+        { "command": "vader.gen.struct" },
+        { "command": "vader.gen.usecase" },
+        { "command": "vader.gen.handler" },
+        { "command": "vader.gen.fn" }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm install"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

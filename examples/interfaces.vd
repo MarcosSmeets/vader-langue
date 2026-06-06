@@ -1,0 +1,34 @@
+// interfaces.vd — despacho dinâmico via interface no backend LLVM.
+
+interface Animal {
+    fn sound(): string
+}
+
+struct Dog {
+    name string
+}
+
+fn (d Dog) sound(): string {
+    return "woof"
+}
+
+struct Cat {
+    name string
+}
+
+fn (c Cat) sound(): string {
+    return "meow"
+}
+
+fn describe(a Animal): string {
+    return a.sound()
+}
+
+fn main() {
+    Dog d = Dog{ name: "Rex" }
+    Animal x = d
+    print(describe(x))   // woof
+
+    Cat c = Cat{ name: "Tom" }
+    print(describe(c))   // meow  (Cat -> Animal na chamada)
+}

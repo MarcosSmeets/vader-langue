@@ -1,0 +1,15 @@
+// generics.vd — genéricos em struct, interface e função.
+
+public struct Box[T] {
+    value T
+}
+
+// a porta Repository deixa de repetir código por tipo.
+public interface Repository[T] {
+    fn save(item T): (T, error)
+    fn findById(id int): (T, error)
+}
+
+public fn first[T](items []T): T {
+    return items[0]
+}

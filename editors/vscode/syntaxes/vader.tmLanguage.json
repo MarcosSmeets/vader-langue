@@ -1,0 +1,97 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Vader",
+  "scopeName": "source.vader",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#function-def" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#function-call" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.vader",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.vader",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.vader",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.vader",
+          "match": "\\\\(n|t|r|\\\\|\"|0)"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.vader",
+          "match": "\\b(if|else|for|in|match|return|spawn)\\b"
+        },
+        {
+          "name": "keyword.declaration.vader",
+          "match": "\\b(fn|struct|interface|enum|import|const|test)\\b"
+        },
+        {
+          "name": "storage.modifier.vader",
+          "match": "\\b(public|private)\\b"
+        },
+        {
+          "name": "keyword.other.assert.vader",
+          "match": "\\b(assert)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.vader",
+      "match": "\\b(true|false|nil)\\b"
+    },
+    "types": {
+      "name": "support.type.vader",
+      "match": "\\b(int|float|bool|string|error|chan|map)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.vader",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.vader",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "function-def": {
+      "match": "\\b(fn)\\s+(?:\\([^)]*\\)\\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.vader" },
+        "2": { "name": "entity.name.function.vader" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "name": "entity.name.function.call.vader"
+    },
+    "operators": {
+      "name": "keyword.operator.vader",
+      "match": "(<-|\\.\\.=|\\.\\.|->|==|!=|<=|>=|&&|\\|\\||[-+*/%<>=!&|])"
+    }
+  }
+}

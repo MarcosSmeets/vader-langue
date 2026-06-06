@@ -1,0 +1,27 @@
+// concurrency.vd — workers e canais (modelo inspirado no Go).
+// Ótimo pra APIs de alta demanda e processamento em background.
+
+fn worker(id int, jobs, results chan[int]) {
+    for job in jobs {
+        results <- job * 2
+    }
+}
+
+fn main() {
+    chan[int] jobs    = chan[int](100)
+    chan[int] results = chan[int](100)
+
+    // `spawn` dispara execução concorrente (leve, estilo goroutine).
+    for i in 0..3 {
+        spawn worker(i, jobs, results)
+    }
+
+    for j in 1..5 {
+        jobs <- j
+    }
+    close(jobs)
+
+    for i in 1..5 {
+        print(<-results)
+    }
+}

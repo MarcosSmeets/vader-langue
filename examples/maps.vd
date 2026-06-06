@@ -1,0 +1,16 @@
+// maps.vd — maps (hash table) no backend LLVM. Construção via newmap(); chave int ou string.
+
+fn main() {
+    map[string]int ages = newmap()
+    ages["ada"] = 36
+    ages["alan"] = 41
+    ages["grace"] = 85
+    print(ages["ada"])     // 36
+    print(ages["alan"])    // 41
+    print(len(ages))       // 3
+
+    map[int]string names = newmap()
+    names[1] = "one"
+    names[2] = "two"
+    print(names[2])        // two
+}

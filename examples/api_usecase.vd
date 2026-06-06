@@ -1,0 +1,27 @@
+// api_usecase.vd — uma fatia de uma API em Clean Architecture.
+// Isto é o tipo de arquivo que `vader gen usecase CreateUser` produziria.
+
+// --- domain (regras puras, sem dependência de infra) ---
+struct User {
+    id   int
+    name string
+}
+
+// Porta (interface) que a infra implementa. O `domain`/`usecase` só conhece
+// esta abstração — o compilador IMPEDE importar `infra` aqui.
+interface UserRepository {
+    fn save(user User): (User, error)
+}
+
+// --- usecase (orquestra a regra de negócio) ---
+struct CreateUser {
+    repo UserRepository
+}
+
+fn (uc CreateUser) execute(name string): (User, error) {
+    if name == "" {
+        return User{}, error("name is required")
+    }
+    User user = User{ name: name }
+    return uc.repo.save(user)
+}

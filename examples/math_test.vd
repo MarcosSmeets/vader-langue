@@ -1,0 +1,21 @@
+// math_test.vd — ...e seu teste GERADO AUTOMATICAMENTE pelo toolchain.
+//
+// Quando você cria/edita uma função em `math.vd`, a Vader cria/atualiza
+// este arquivo espelho com um stub de teste pronto pra preencher.
+// Esse é o coração do diferencial: TDD por padrão, sem esforço.
+
+test "add returns the sum" {
+    int got = add(2, 3)
+    assert got == 5
+}
+
+test "divide returns the quotient" {
+    int got, error err = divide(10, 2)
+    assert err == nil
+    assert got == 5
+}
+
+test "divide by zero returns an error" {
+    _, error err = divide(10, 0)
+    assert err != nil
+}
