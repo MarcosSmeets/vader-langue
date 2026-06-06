@@ -1,0 +1,17 @@
+// Worker com memória limitada: cada job roda num escopo de arena,
+// liberado de uma vez no fim — sem-GC, determinístico.
+import "std/mem"
+import "std/json"
+
+public fn main() {
+    int i = 0
+    for i < 5 {
+        Arena a = mem.scope()                 // abre o escopo do job
+        Json msg = json.object()
+        json.set_int(msg, "job", i)
+        json.set_str(msg, "status", "done")
+        print(json.encode(msg))
+        mem.release(a)                        // libera tudo do job
+        i = i + 1
+    }
+}

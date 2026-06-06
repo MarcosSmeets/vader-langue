@@ -50,6 +50,7 @@ struct Gen {
     has_db: bool,
     has_http: bool,
     has_json: bool,
+    has_mem: bool,
     needs: Needs,
 }
 
@@ -65,6 +66,7 @@ struct Needs {
     db: bool,
     http: bool,
     json: bool,
+    mem: bool,
 }
 
 enum MatchMode {
@@ -101,6 +103,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         has_db: program.imports.iter().any(|i| i.starts_with("std/db")),
         has_http: program.imports.iter().any(|i| i.starts_with("std/http")),
         has_json: program.imports.iter().any(|i| i.starts_with("std/json")),
+        has_mem: program.imports.iter().any(|i| i.starts_with("std/mem")),
         needs: Needs::default(),
     };
 
@@ -326,6 +329,12 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare i8* @vader_json_encode(i8*)\n",
         );
     }
+    if g.needs.mem {
+        result.push_str(
+            "declare i8* @vader_scope()\n\
+             declare void @vader_release(i8*)\n",
+        );
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -345,17 +354,46 @@ pub fn generate(program: &Program) -> Result<String, String> {
 const STRCAT_IR: &str = "declare i64 @strlen(i8*)
 declare i8* @strcpy(i8*, i8*)
 declare i8* @strcat(i8*, i8*)
+declare i8* @vader_alloc(i64)
 define i8* @vader_strcat(i8* %a, i8* %b) {
   %la = call i64 @strlen(i8* %a)
   %lb = call i64 @strlen(i8* %b)
   %s = add i64 %la, %lb
   %sz = add i64 %s, 1
-  %buf = call i8* @malloc(i64 %sz)
+  %buf = call i8* @vader_alloc(i64 %sz)
   %c1 = call i8* @strcpy(i8* %buf, i8* %a)
   %c2 = call i8* @strcat(i8* %buf, i8* %b)
   ret i8* %buf
 }
 ";
+
+/// Move todas as instruções `alloca` de uma função pro topo do bloco `entry`.
+/// (Allocas fora do entry, dentro de loops, vazam pilha a cada iteração.)
+fn hoist_allocas(text: &str) -> String {
+    let mut header = String::new(); // até e incluindo "entry:"
+    let mut allocas = String::new();
+    let mut body = String::new();
+    let mut seen_entry = false;
+    for line in text.lines() {
+        if !seen_entry {
+            header.push_str(line);
+            header.push('\n');
+            if line.trim_end() == "entry:" {
+                seen_entry = true;
+            }
+        } else if line.trim_start().contains(" = alloca ") {
+            allocas.push_str(line);
+            allocas.push('\n');
+        } else {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    if !seen_entry {
+        return text.to_string();
+    }
+    format!("{}{}{}", header, allocas, body)
+}
 
 impl Gen {
     fn ty_of(&self, t: &Type) -> Result<String, String> {
@@ -366,7 +404,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" | "Server" | "Json" => "i8*".to_string(), // handles opacos da stdlib
+                "DB" | "Rows" | "Server" | "Json" | "Arena" => "i8*".to_string(), // handles opacos da stdlib
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -510,6 +548,7 @@ impl Gen {
             .iter()
             .map(|(n, t)| format!("{} %{}", t, n))
             .collect();
+        let fn_begin = self.out.len();
         self.out
             .push_str(&format!("define {} @{}({}) {{\n", ret, name, sig.join(", ")));
         self.out.push_str("entry:\n");
@@ -548,6 +587,10 @@ impl Gen {
             }
         }
         self.out.push_str("}\n\n");
+        // hoist dos allocas pro bloco entry: dentro de loops, allocas fora do entry
+        // crescem a pilha a cada iteração (só liberam no return). Mover pro topo limita.
+        let f_text = self.out.split_off(fn_begin);
+        self.out.push_str(&hoist_allocas(&f_text));
         Ok(())
     }
 
@@ -1438,6 +1481,21 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
+    /// Intrínsecas de `std/mem` (arena/região): escopo manual pra workers.
+    fn gen_mem_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "scope" => ("vader_scope", "i8*", &[]),
+            "release" => ("vader_release", "void", &["i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.mem = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
     /// Emite uma chamada a uma função externa (runtime C). Coage args (i64->i32,
     /// i1->i32) e converte o retorno (i1<-i32 via icmp; void; senão direto).
     fn emit_extern(
@@ -1575,6 +1633,11 @@ impl Gen {
         }
         if self.has_json {
             if let Some(r) = self.gen_json_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_mem {
+            if let Some(r) = self.gen_mem_call(&name, args)? {
                 return Ok(r);
             }
         }

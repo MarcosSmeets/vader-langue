@@ -69,7 +69,7 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
         enums: HashSet::new(),
         interfaces: HashSet::new(),
         type_params: HashSet::new(),
-        opaque: ["DB", "Rows", "Server", "Json", "Conn"]
+        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena"]
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -243,6 +243,20 @@ impl Checker {
                 ("add_str", vec![Unknown, String], vec![Unknown]),
                 ("add_int", vec![Unknown, Int], vec![Unknown]),
                 ("encode", vec![Unknown], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions
+                    .entry(name.to_string())
+                    .or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/mem: arena/região (Arena -> Unknown opaco).
+        if program.imports.iter().any(|i| i.starts_with("std/mem")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 2] = [
+                ("scope", vec![], vec![Unknown]),
+                ("release", vec![Unknown], vec![]),
             ];
             for (name, params, returns) in sigs {
                 self.functions

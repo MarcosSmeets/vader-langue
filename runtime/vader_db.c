@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* alocador de arena (vader_mem.c): leituras de banco são scratch por request */
+extern char *vader_strdup(const char *s);
+
 /* driver Postgres (vader_pg.c) — visto como ponteiros opacos aqui */
 extern void *vader_pg_connect(const char *dsn);
 extern const char *vader_pg_exec(void *c, const char *sql);
@@ -69,13 +72,13 @@ void *vader_db_open(const char *dsn) {
 
 const char *vader_db_exec(void *handle, const char *sql) {
     VDB *d = handle;
-    if (!d) return strdup("conexão nula");
+    if (!d) return vader_strdup("conexão nula");
     if (d->kind == K_PG) return vader_pg_exec(d->h, sql);
     if (d->kind == K_MYSQL) return vader_my_exec(d->h, sql);
     char *err = 0;
     int rc = sqlite3_exec((sqlite3 *)d->h, sql, 0, 0, &err);
     if (rc != SQLITE_OK) {
-        const char *msg = strdup(err ? err : "erro SQL desconhecido");
+        const char *msg = vader_strdup(err ? err : "erro SQL desconhecido");
         if (err) sqlite3_free(err);
         return msg;
     }
@@ -133,11 +136,11 @@ double vader_db_col_float(void *rowsh, int col) {
 
 const char *vader_db_col_text(void *rowsh, int col) {
     VRows *r = rowsh;
-    if (!r) return strdup("");
+    if (!r) return vader_strdup("");
     if (r->kind == K_PG) return vader_pg_text(r->h, col);
     if (r->kind == K_MYSQL) return vader_my_text(r->h, col);
     const unsigned char *t = sqlite3_column_text((sqlite3_stmt *)r->h, col);
-    return strdup(t ? (const char *)t : "");
+    return vader_strdup(t ? (const char *)t : "");
 }
 
 /* exec que aborta (exit 1) se o SQL falhar — útil pra migrations e scripts. */

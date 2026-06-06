@@ -23,6 +23,8 @@ const VADER_MYSQL_C: &str = include_str!("../runtime/vader_mysql.c");
 /// stdlib: HTTP (servidor + cliente) e JSON (parse/encode), linkados sob demanda.
 const VADER_HTTP_C: &str = include_str!("../runtime/vader_http.c");
 const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
+/// Alocador de arena/região (memória de serviço longo): bump-alloc por escopo.
+const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 
 use vader::ast::Program;
 use vader::{
@@ -507,10 +509,12 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
     cmd.arg("-Wno-override-module").arg(&ll);
     if ir.contains("@vader_") {
         let rt = dir.join("vader_rt.c");
+        let mem = dir.join("vader_mem.c");
         std::fs::write(&rt, RUNTIME_C).map_err(|e| format!("write runtime: {}", e))?;
-        cmd.arg(&rt).arg("-lpthread");
+        std::fs::write(&mem, VADER_MEM_C).map_err(|e| format!("write vader_mem.c: {}", e))?;
+        cmd.arg(&rt).arg(&mem).arg("-lpthread");
         if !quiet {
-            println!("(linkando runtime de concorrência)");
+            println!("(linkando runtime + alocador de arena)");
         }
     }
     if ir.contains("@vader_db_") {

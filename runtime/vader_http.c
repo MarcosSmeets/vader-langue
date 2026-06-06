@@ -11,6 +11,14 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 
+/* alocador de arena (vader_mem.c): o servidor cicla uma arena por request */
+extern void *vader_alloc(long n);
+extern void *vader_realloc(void *old, long oldn, long newn);
+extern char *vader_strdup(const char *s);
+extern void *vader_scope(void);
+extern void vader_reset(void *arena);
+extern void vader_release(void *arena);
+
 static int h_write_all(int fd, const unsigned char *buf, int n) {
     int s = 0;
     while (s < n) {
@@ -29,6 +37,7 @@ typedef struct {
     char *path;
     char *body;
     char *headers; /* bloco cru de cabeçalhos (inclui a request line) */
+    void *req_arena; /* arena da request atual (liberada na próxima accept) */
 } HttpServer;
 
 void *vader_http_listen(long port) {
@@ -58,6 +67,14 @@ int vader_http_accept(void *sv) {
     s->cfd = c;
     s->method[0] = 0;
 
+    /* memória limitada: reusa UMA arena por servidor, zerando-a a cada request
+       (sem churn de malloc/free). O corpo do loop (parse + JSON + strings) aloca
+       aqui e é descartado no próximo accept. */
+    if (s->req_arena)
+        vader_reset(s->req_arena);
+    else
+        s->req_arena = vader_scope();
+
     char buf[65536];
     int n = 0, hdr_end = -1;
     while (n < (int)sizeof(buf) - 1) {
@@ -72,16 +89,16 @@ int vader_http_accept(void *sv) {
         }
     }
     if (hdr_end < 0) {
-        s->path = strdup("");
-        s->body = strdup("");
-        s->headers = strdup("");
+        s->path = vader_strdup("");
+        s->body = vader_strdup("");
+        s->headers = vader_strdup("");
         return 1;
     }
     char m[16] = {0}, path[2048] = {0};
     sscanf(buf, "%15s %2047s", m, path);
     strncpy(s->method, m, 15);
-    s->path = strdup(path);
-    s->headers = malloc(hdr_end + 1);
+    s->path = vader_strdup(path);
+    s->headers = vader_alloc(hdr_end + 1);
     memcpy(s->headers, buf, hdr_end);
     s->headers[hdr_end] = 0;
 
@@ -91,7 +108,7 @@ int vader_http_accept(void *sv) {
         clen = atoi(cl + 15);
     int body_start = hdr_end + 4;
     int have = n - body_start;
-    char *body = malloc(clen + 1);
+    char *body = vader_alloc(clen + 1);
     int copy = have < clen ? have : clen;
     if (copy > 0)
         memcpy(body, buf + body_start, copy);
@@ -108,33 +125,33 @@ int vader_http_accept(void *sv) {
 
 const char *vader_http_method(void *sv) {
     HttpServer *s = sv;
-    return strdup(s && s->method[0] ? s->method : "");
+    return vader_strdup(s && s->method[0] ? s->method : "");
 }
 const char *vader_http_path(void *sv) {
     HttpServer *s = sv;
-    return strdup(s && s->path ? s->path : "");
+    return vader_strdup(s && s->path ? s->path : "");
 }
 const char *vader_http_body(void *sv) {
     HttpServer *s = sv;
-    return strdup(s && s->body ? s->body : "");
+    return vader_strdup(s && s->body ? s->body : "");
 }
 
 /* valor de um cabeçalho do request (case-insensitive), ou "" se ausente. */
 const char *vader_http_header(void *sv, const char *name) {
     HttpServer *s = sv;
     if (!s || !s->headers)
-        return strdup("");
+        return vader_strdup("");
     char needle[256];
     snprintf(needle, sizeof(needle), "\r\n%s:", name);
     char *p = strcasestr(s->headers, needle);
     if (!p)
-        return strdup("");
+        return vader_strdup("");
     p += strlen(needle);
     while (*p == ' ')
         p++;
     char *end = strstr(p, "\r\n");
     int len = end ? (int)(end - p) : (int)strlen(p);
-    char *out = malloc(len + 1);
+    char *out = vader_alloc(len + 1);
     memcpy(out, p, len);
     out[len] = 0;
     return out;
@@ -163,10 +180,8 @@ void vader_http_respond(void *sv, long status, const char *ctype, const char *bo
     h_write_all(s->cfd, (const unsigned char *)body, blen);
     close(s->cfd);
     s->cfd = -1;
-    free(s->path);
-    free(s->body);
-    free(s->headers);
-    s->path = s->body = s->headers = 0;
+    /* não dá free() aqui: path/body/headers vivem na arena da request,
+       liberada em massa na próxima accept. */
 }
 
 /* ===================== cliente ============================================ */
@@ -176,7 +191,7 @@ static const char *http_request(const char *method, const char *url,
     if (strncmp(p, "http://", 7) == 0)
         p += 7;
     else if (strncmp(p, "https://", 8) == 0)
-        return strdup(""); /* v1: cliente sem TLS */
+        return vader_strdup(""); /* v1: cliente sem TLS */
     char host[256] = {0}, path[2048] = "/";
     int port = 80;
     const char *slash = strchr(p, '/');
@@ -200,11 +215,11 @@ static const char *http_request(const char *method, const char *url,
     char ps[16];
     snprintf(ps, sizeof(ps), "%d", port);
     if (getaddrinfo(host, ps, &hints, &res) != 0)
-        return strdup("");
+        return vader_strdup("");
     int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (fd < 0 || connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
         freeaddrinfo(res);
-        return strdup("");
+        return vader_strdup("");
     }
     freeaddrinfo(res);
 
@@ -226,11 +241,12 @@ static const char *http_request(const char *method, const char *url,
 
     /* lê a resposta inteira */
     int cap = 65536, n = 0;
-    char *resp = malloc(cap);
+    char *resp = vader_alloc(cap);
     for (;;) {
         if (n >= cap - 1) {
+            int oc = cap;
             cap *= 2;
-            resp = realloc(resp, cap);
+            resp = vader_realloc(resp, oc, cap);
         }
         int r = read(fd, resp + n, cap - 1 - n);
         if (r <= 0)
@@ -240,7 +256,7 @@ static const char *http_request(const char *method, const char *url,
     resp[n] = 0;
     close(fd);
     char *bp = strstr(resp, "\r\n\r\n");
-    return strdup(bp ? bp + 4 : "");
+    return vader_strdup(bp ? bp + 4 : "");
 }
 
 const char *vader_http_get(const char *url) {

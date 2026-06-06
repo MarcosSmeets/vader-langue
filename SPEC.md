@@ -194,7 +194,13 @@ pra LLVM mexe só na última caixa.
 - [x] **Canais + goroutines** no LLVM — runtime C (`runtime/vader_rt.c`, pthreads: canais bloqueantes + spawn), linkado pelo clang. `concurrency.vd` roda nativo. **Concorrência sem Go.**
 - [x] **Maps** no LLVM — hash table no runtime C (chave int/string), `map[K]V` + `newmap()`. `maps.vd` roda nativo.
 - [x] **LLVM compila a linguagem INTEIRA** — `vader llvm <file>` produz binário nativo sem Go pra todo recurso (int/float/string/struct/método/enum/match/slice/interface/genérico/canal/goroutine/map). 7 exemplos rodam nativos.
-- [ ] Modo sem-GC explícito / liberação de memória (hoje vaza); mirar embarcados / tempo-real
+- [x] **Memória de serviço longo (arena/região, sem-GC)** — `runtime/vader_mem.c`: alocador
+      de arena (bump + free em massa) com escopo thread-local. Strings/JSON/HTTP/db roteados
+      por `vader_alloc`. `http.accept` cicla a arena por request automaticamente; `std/mem.scope/
+      release` pros workers. **+ fix de codegen:** `hoist_allocas` move allocas pro bloco `entry`
+      (allocas em loops vazavam pilha). **Verificado: servidor HTTP fica em RSS constante sob
+      8000 requests** (runtime provado 0 leak de heap). Determinístico, alinhado com tempo-real.
+- [ ] Modo sem-arena por padrão / liberação explícita pra embarcado puro (hoje: sem escopo = malloc que vaza, de propósito)
 
 ### Fase 4 — Ecossistema & adoção  ◀ INICIADA
 - [x] **Extensão VSCode — syntax highlighting** (`editors/vscode/`): gramática TextMate

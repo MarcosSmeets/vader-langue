@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* alocador de arena (vader_mem.c) — JSON é tipicamente scratch por request/job */
+extern void *vader_alloc(long n);
+extern void *vader_realloc(void *old, long oldn, long newn);
+extern char *vader_strdup(const char *s);
+
 enum { J_NULL, J_BOOL, J_INT, J_DBL, J_STR, J_ARR, J_OBJ };
 
 typedef struct JVal {
@@ -20,16 +25,18 @@ typedef struct JVal {
 static JVal JNULL = {J_NULL, 0, 0, 0, 0, 0, 0, 0, 0};
 
 static JVal *jnew(int type) {
-    JVal *v = calloc(1, sizeof(JVal));
+    JVal *v = (JVal *)vader_alloc(sizeof(JVal));
+    memset(v, 0, sizeof(JVal));
     v->type = type;
     return v;
 }
 static void jgrow(JVal *v) {
     if (v->count >= v->cap) {
-        v->cap = v->cap ? v->cap * 2 : 4;
-        v->items = realloc(v->items, v->cap * sizeof(JVal *));
+        int oldcap = v->cap;
+        v->cap = oldcap ? oldcap * 2 : 4;
+        v->items = vader_realloc(v->items, oldcap * sizeof(JVal *), v->cap * sizeof(JVal *));
         if (v->type == J_OBJ)
-            v->keys = realloc(v->keys, v->cap * sizeof(char *));
+            v->keys = vader_realloc(v->keys, oldcap * sizeof(char *), v->cap * sizeof(char *));
     }
 }
 
@@ -42,11 +49,12 @@ static void jskip(const char **p) {
 static char *jparse_str(const char **p) {
     (*p)++; /* aspas de abertura */
     int cap = 16, n = 0;
-    char *out = malloc(cap);
+    char *out = vader_alloc(cap);
     while (**p && **p != '"') {
         if (n + 4 >= cap) {
+            int oc = cap;
             cap *= 2;
-            out = realloc(out, cap);
+            out = vader_realloc(out, oc, cap);
         }
         if (**p == '\\') {
             (*p)++;
@@ -174,13 +182,13 @@ void *vader_json_elem(void *jv, int idx) {
 }
 const char *vader_json_as_str(void *jv) {
     JVal *v = jv;
-    if (!v) return strdup("");
-    if (v->type == J_STR) return strdup(v->s);
+    if (!v) return vader_strdup("");
+    if (v->type == J_STR) return vader_strdup(v->s);
     char buf[64];
-    if (v->type == J_INT) { snprintf(buf, sizeof buf, "%lld", v->i); return strdup(buf); }
-    if (v->type == J_DBL) { snprintf(buf, sizeof buf, "%g", v->d); return strdup(buf); }
-    if (v->type == J_BOOL) return strdup(v->b ? "true" : "false");
-    return strdup("");
+    if (v->type == J_INT) { snprintf(buf, sizeof buf, "%lld", v->i); return vader_strdup(buf); }
+    if (v->type == J_DBL) { snprintf(buf, sizeof buf, "%g", v->d); return vader_strdup(buf); }
+    if (v->type == J_BOOL) return vader_strdup(v->b ? "true" : "false");
+    return vader_strdup("");
 }
 long long vader_json_as_int(void *jv) {
     JVal *v = jv;
@@ -220,13 +228,13 @@ static void obj_set(JVal *o, const char *key, JVal *val) {
     for (int i = 0; i < o->count; i++)
         if (strcmp(o->keys[i], key) == 0) { o->items[i] = val; return; }
     jgrow(o);
-    o->keys[o->count] = strdup(key);
+    o->keys[o->count] = vader_strdup(key);
     o->items[o->count] = val;
     o->count++;
 }
 void *vader_json_set(void *o, const char *key, void *child) { obj_set(o, key, child); return o; }
 void *vader_json_set_str(void *o, const char *key, const char *val) {
-    JVal *v = jnew(J_STR); v->s = strdup(val); obj_set(o, key, v); return o;
+    JVal *v = jnew(J_STR); v->s = vader_strdup(val); obj_set(o, key, v); return o;
 }
 void *vader_json_set_int(void *o, const char *key, long long val) {
     JVal *v = jnew(J_INT); v->i = val; obj_set(o, key, v); return o;
@@ -244,7 +252,7 @@ static void arr_add(JVal *a, JVal *val) {
 }
 void *vader_json_add(void *a, void *child) { arr_add(a, child); return a; }
 void *vader_json_add_str(void *a, const char *val) {
-    JVal *v = jnew(J_STR); v->s = strdup(val); arr_add(a, v); return a;
+    JVal *v = jnew(J_STR); v->s = vader_strdup(val); arr_add(a, v); return a;
 }
 void *vader_json_add_int(void *a, long long val) {
     JVal *v = jnew(J_INT); v->i = val; arr_add(a, v); return a;
@@ -253,7 +261,11 @@ void *vader_json_add_int(void *a, long long val) {
 /* ===================== encode ============================================ */
 typedef struct { char *buf; int len, cap; } SB;
 static void sb_putc(SB *s, char c) {
-    if (s->len + 1 >= s->cap) { s->cap = s->cap ? s->cap * 2 : 64; s->buf = realloc(s->buf, s->cap); }
+    if (s->len + 1 >= s->cap) {
+        int oc = s->cap;
+        s->cap = s->cap ? s->cap * 2 : 64;
+        s->buf = vader_realloc(s->buf, oc, s->cap);
+    }
     s->buf[s->len++] = c;
 }
 static void sb_puts(SB *s, const char *str) {
@@ -303,5 +315,5 @@ const char *vader_json_encode(void *jv) {
     SB s = {0, 0, 0};
     jencode(&s, jv);
     sb_putc(&s, 0);
-    return s.buf ? s.buf : strdup("null");
+    return s.buf ? s.buf : vader_strdup("null");
 }
