@@ -5,4 +5,5 @@ PUBLISHING.md
 .vscode-test/**
 **/*.map
 **/.git/**
+.claude/**
 icons/render-icon.js
