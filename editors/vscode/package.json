@@ -2,25 +2,49 @@
   "name": "vader",
   "displayName": "Vader Language",
   "description": "Syntax highlighting + Language Server + geração de código (scaffolding) para a linguagem Vader.",
-  "version": "0.3.0",
-  "publisher": "SEU-PUBLISHER-ID",
+  "version": "0.4.0",
+  "publisher": "Vader",
   "license": "MIT",
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["vader", "language", "compiler", "lsp", "syntax-highlighting"],
+  "icon": "icons/icon.png",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "vader",
+    "language",
+    "compiler",
+    "lsp",
+    "syntax-highlighting"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/MarcosSmeets/vader-langue.git"
   },
-  "bugs": { "url": "https://github.com/MarcosSmeets/vader-langue/issues" },
+  "bugs": {
+    "url": "https://github.com/MarcosSmeets/vader-langue/issues"
+  },
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:vader"],
+  "activationEvents": [
+    "onLanguage:vader"
+  ],
   "contributes": {
     "languages": [
       {
         "id": "vader",
-        "aliases": ["Vader", "vader"],
-        "extensions": [".vd"],
+        "aliases": [
+          "Vader",
+          "vader"
+        ],
+        "extensions": [
+          ".vd"
+        ],
+        "icon": {
+          "light": "./icons/vader-file-light.svg",
+          "dark": "./icons/vader-file-dark.svg"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
@@ -47,14 +71,40 @@
       }
     },
     "commands": [
-      { "command": "vader.gen.struct", "title": "Gerar Struct", "category": "Vader" },
-      { "command": "vader.gen.usecase", "title": "Gerar Use Case", "category": "Vader" },
-      { "command": "vader.gen.handler", "title": "Gerar Handler", "category": "Vader" },
-      { "command": "vader.gen.fn", "title": "Gerar Função", "category": "Vader" }
+      {
+        "command": "vader.gen.struct",
+        "title": "Gerar Struct",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.gen.usecase",
+        "title": "Gerar Use Case",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.gen.handler",
+        "title": "Gerar Handler",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.gen.fn",
+        "title": "Gerar Função",
+        "category": "Vader"
+      }
     ],
-    "submenus": [{ "id": "vader.genMenu", "label": "Vader: Gerar" }],
+    "submenus": [
+      {
+        "id": "vader.genMenu",
+        "label": "Vader: Gerar"
+      }
+    ],
     "menus": {
-      "explorer/context": [{ "submenu": "vader.genMenu", "group": "2_workspace" }],
+      "explorer/context": [
+        {
+          "submenu": "vader.genMenu",
+          "group": "2_workspace"
+        }
+      ],
       "editor/context": [
         {
           "submenu": "vader.genMenu",
@@ -63,10 +113,18 @@
         }
       ],
       "vader.genMenu": [
-        { "command": "vader.gen.struct" },
-        { "command": "vader.gen.usecase" },
-        { "command": "vader.gen.handler" },
-        { "command": "vader.gen.fn" }
+        {
+          "command": "vader.gen.struct"
+        },
+        {
+          "command": "vader.gen.usecase"
+        },
+        {
+          "command": "vader.gen.handler"
+        },
+        {
+          "command": "vader.gen.fn"
+        }
       ]
     }
   },

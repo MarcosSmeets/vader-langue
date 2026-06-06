@@ -1,0 +1,12 @@
+<!-- .vd file icon for LIGHT UI themes (dark document, reads on light backgrounds).
+     From the brand "FileGlyph": a source-file document carrying the Visor mark. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 100" width="84" height="100">
+  <path d="M10 4 H58 L74 20 V92 a4 4 0 0 1 -4 4 H14 a4 4 0 0 1 -4 -4 Z" fill="#14161b"/>
+  <path d="M58 4 V16 a4 4 0 0 0 4 4 H74 Z" fill="#ffffff" fill-opacity="0.14"/>
+  <g transform="translate(24 26) scale(0.36)">
+    <path d="M24 24 H76 V50 L50 82 L24 50 Z" fill="#f4f2ec"/>
+    <path d="M33 41 H67 L61 51 H39 Z" fill="#e21d2e"/>
+  </g>
+  <text x="42" y="82" text-anchor="middle" font-family="'JetBrains Mono','SFMono-Regular',Consolas,monospace"
+        font-size="13" font-weight="700" letter-spacing="0.5" fill="#f4f2ec" fill-opacity="0.92">.vd</text>
+</svg>

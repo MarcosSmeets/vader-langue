@@ -1,0 +1,26 @@
+<!-- Vader marketplace icon — "Visor" mark on a dark tile.
+     Mirrors the AppTile mockup from the brand exploration:
+     ink #14161b tile (radius = 20%), saber-red radial glow from the top,
+     Visor shield (paper) with glowing red slit (accent), mark at 56% of the tile. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="120%" gradientTransform="scale(1 0.75)">
+      <stop offset="0%" stop-color="#e21d2e" stop-opacity="0.12"/>
+      <stop offset="60%" stop-color="#e21d2e" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="tile">
+      <rect x="0" y="0" width="128" height="128" rx="25.6" ry="25.6"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect x="0" y="0" width="128" height="128" fill="#14161b"/>
+    <rect x="0" y="0" width="128" height="128" fill="url(#glow)"/>
+
+    <!-- Visor mark, scaled to 56% (71.68px) and centred -->
+    <g transform="translate(28.16 28.16) scale(0.7168)">
+      <path d="M24 24 H76 V50 L50 82 L24 50 Z" fill="#f4f2ec"/>
+      <path d="M33 41 H67 L61 51 H39 Z" fill="#e21d2e"/>
+    </g>
+  </g>
+</svg>

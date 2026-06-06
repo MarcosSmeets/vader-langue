@@ -1,0 +1,8 @@
+# Arquivos que NÃO vão pro .vsix (mantém node_modules: são deps de runtime do LSP).
+.gitignore
+.vscodeignore
+PUBLISHING.md
+.vscode-test/**
+**/*.map
+**/.git/**
+icons/render-icon.js
