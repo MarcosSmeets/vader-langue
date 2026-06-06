@@ -138,36 +138,44 @@ pub fn status() -> Result<(), String> {
     Ok(())
 }
 
-pub fn up() -> Result<(), String> {
-    let all = migrations();
-    let mut app = applied();
-    let mut ran = 0;
-    for m in &all {
-        if !app.contains(m) {
-            let sql = fs::read_to_string(format!("{}/{}.up.sql", DIR, m)).unwrap_or_default();
-            println!("\u{25B6} {} (up):\n{}", m, sql.trim_end());
-            app.push(m.clone());
-            ran += 1;
-        }
-    }
-    set_applied(&app)?;
-    println!("\n{} migration(s) marcada(s) como aplicada(s) [rastreamento local].", ran);
-    println!("nota: a execução no banco real depende dos drivers (std/db), em construção.");
-    Ok(())
+/// Migrations ainda não aplicadas, em ordem.
+pub fn pending() -> Vec<String> {
+    let app = applied();
+    migrations()
+        .into_iter()
+        .filter(|m| !app.contains(m))
+        .collect()
 }
 
-pub fn down() -> Result<(), String> {
+/// SQL de subida de uma migration.
+pub fn up_sql(name: &str) -> String {
+    fs::read_to_string(format!("{}/{}.up.sql", DIR, name)).unwrap_or_default()
+}
+
+/// SQL de reversão de uma migration.
+pub fn down_sql(name: &str) -> String {
+    fs::read_to_string(format!("{}/{}.down.sql", DIR, name)).unwrap_or_default()
+}
+
+/// Marca uma migration como aplicada (rastreamento local em `migrations/.applied`).
+pub fn mark_applied(name: &str) -> Result<(), String> {
     let mut app = applied();
-    match app.pop() {
-        Some(last) => {
-            let sql = fs::read_to_string(format!("{}/{}.down.sql", DIR, last)).unwrap_or_default();
-            println!("\u{25C0} {} (down):\n{}", last, sql.trim_end());
-            set_applied(&app)?;
-            println!("\nrevertida [local]. Execução real depende dos drivers (std/db).");
-        }
-        None => println!("nenhuma migration aplicada."),
+    if !app.iter().any(|m| m == name) {
+        app.push(name.to_string());
     }
-    Ok(())
+    set_applied(&app)
+}
+
+/// Remove uma migration do rastreamento de aplicadas.
+pub fn unmark(name: &str) -> Result<(), String> {
+    let mut app = applied();
+    app.retain(|m| m != name);
+    set_applied(&app)
+}
+
+/// Última migration aplicada (alvo do `down`).
+pub fn last_applied() -> Option<String> {
+    applied().pop()
 }
 
 #[cfg(test)]

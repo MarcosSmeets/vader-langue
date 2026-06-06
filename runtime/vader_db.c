@@ -6,6 +6,7 @@
  * Os handles carregam uma tag interna; pro IR continuam sendo i8* opacos.
  * Sem-GC: strings retornadas vazam, alinhado com o runtime. */
 #include "sqlite3.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -112,6 +113,15 @@ const char *vader_db_col_text(void *rowsh, int col) {
     if (r->kind == K_PG) return vader_pg_text(r->h, col);
     const unsigned char *t = sqlite3_column_text((sqlite3_stmt *)r->h, col);
     return strdup(t ? (const char *)t : "");
+}
+
+/* exec que aborta (exit 1) se o SQL falhar — útil pra migrations e scripts. */
+void vader_db_must(void *handle, const char *sql) {
+    const char *err = vader_db_exec(handle, sql);
+    if (err) {
+        fprintf(stderr, "erro de SQL: %s\n", err);
+        exit(1);
+    }
 }
 
 void vader_db_close(void *handle) {

@@ -148,8 +148,12 @@ pra LLVM mexe só na última caixa.
 - [x] **Driver REAL de SQLite** — `import "std/db"`: `sqlite3.c` (amalgamation, domínio público)
       embarcado e linkado pelo clang no backend nativo. API `open/exec/query/next/col_int/col_text/col_float/close`.
       **Zero instalação, binário self-contained.** `examples/db_sqlite.vd` roda (persiste em arquivo). Cache do `.o`.
-- [ ] Drivers REAIS de Postgres/MySQL (wire protocol por TCP) + Mongo — próxima fase
-- [ ] Execução das migrations (hoje só gera SQL)
+- [x] **Driver Postgres** (wire protocol puro + SCRAM-SHA-256, `postgres://...`) — compila,
+      verificação ao vivo pendente (sem servidor de teste). Mesma API do SQLite.
+- [ ] Postgres com TLS (cloud) + auth MD5 + driver MySQL/Mongo — próxima fase
+- [x] **Execução real das migrations** — `vader migrate up/down [--db <dsn>]` (ou `[database] url`
+      no vader.toml) roda o SQL no banco via `std/db` (`db.must` aborta se falhar; só marca
+      aplicada em sucesso). **Verificado contra SQLite** (up cria+seed, down reverte).
 - [x] **Gerenciador de pacotes (git/URL)** — `vader add <git-url|path>[@versão]` / `vader remove`:
       `git clone` num cache (`~/.vader/pkg`), `[dependencies]` no `vader.toml` + `vader.lock`
       (commit pinado). `module::load` faz fetch e injeta os `.vd` da dep no projeto. **Verificado

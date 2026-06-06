@@ -275,6 +275,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         result.push_str(
             "declare i8* @vader_db_open(i8*)\n\
              declare i8* @vader_db_exec(i8*, i8*)\n\
+             declare void @vader_db_must(i8*, i8*)\n\
              declare i8* @vader_db_query(i8*, i8*)\n\
              declare i32 @vader_db_next(i8*)\n\
              declare i64 @vader_db_col_int(i8*, i32)\n\
@@ -1329,6 +1330,7 @@ impl Gen {
         let (extern_name, ret, ptys): (&str, &str, &[&str]) = match name {
             "open" => ("vader_db_open", "i8*", &["i8*"]),
             "exec" => ("vader_db_exec", "i8*", &["i8*", "i8*"]),
+            "must" => ("vader_db_must", "void", &["i8*", "i8*"]),
             "query" => ("vader_db_query", "i8*", &["i8*", "i8*"]),
             "next" => ("vader_db_next", "i1", &["i8*"]),
             "col_int" => ("vader_db_col_int", "i64", &["i8*", "i32"]),

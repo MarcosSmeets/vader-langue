@@ -140,9 +140,10 @@ impl Checker {
         // DB/Rows são handles opacos (resolvem pra Unknown, que é lenient).
         if program.imports.iter().any(|i| i.starts_with("std/db")) {
             use Ty::*;
-            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 8] = [
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
                 ("open", vec![String], vec![Unknown]),
                 ("exec", vec![Unknown, String], vec![Error]),
+                ("must", vec![Unknown, String], vec![]),
                 ("query", vec![Unknown, String], vec![Unknown]),
                 ("next", vec![Unknown], vec![Bool]),
                 ("col_int", vec![Unknown, Int], vec![Int]),

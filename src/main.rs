@@ -334,21 +334,20 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let tokens = match lexer::tokenize(&source) {
-        Ok(t) => t,
+    match build_run_source(&source, false) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{}", e);
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
-    };
-    let mut program = match parser::parse(tokens) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{}", e);
-            return ExitCode::FAILURE;
-        }
-    };
-    // normaliza qualificadores de pacote (ex.: `db.open` -> `open`) como nos builds de diretório
+    }
+}
+
+/// Compila uma fonte Vader via LLVM + clang e roda o binário (Result, p/ reuso).
+/// `quiet` suprime os logs de progresso (usado pelo `vader migrate`).
+fn build_run_source(source: &str, quiet: bool) -> Result<(), String> {
+    let tokens = lexer::tokenize(source).map_err(|e| e.to_string())?;
+    let mut program = parser::parse(tokens).map_err(|e| e.to_string())?;
     if !program.imports.is_empty() {
         let packages: std::collections::HashSet<String> = program
             .imports
@@ -358,60 +357,44 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
         module::normalize(&mut program, &packages);
     }
     if let Err(errors) = check::check(&program) {
-        for e in &errors {
-            eprintln!("type error at {}:{}: {}", e.line, e.col, e.message);
-        }
-        return ExitCode::FAILURE;
+        let msg = errors
+            .iter()
+            .map(|e| format!("{}:{}: {}", e.line, e.col, e.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!("type error: {}", msg));
     }
-
-    let ir = match llvm::generate(&program) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{}", e);
-            return ExitCode::FAILURE;
-        }
-    };
+    let ir = llvm::generate(&program)?;
 
     let dir = std::env::temp_dir().join("vader_llvm");
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        eprintln!("error: cannot create temp dir: {}", e);
-        return ExitCode::FAILURE;
-    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
     let ll = dir.join("out.ll");
     let bin = dir.join("out");
-    if let Err(e) = std::fs::write(&ll, &ir) {
-        eprintln!("error: cannot write LLVM IR: {}", e);
-        return ExitCode::FAILURE;
+    std::fs::write(&ll, &ir).map_err(|e| format!("write IR: {}", e))?;
+    if !quiet {
+        println!("emitted LLVM IR: {}", ll.display());
     }
-    println!("emitted LLVM IR: {}", ll.display());
 
     let mut cmd = Command::new("clang");
     cmd.arg("-Wno-override-module").arg(&ll);
-    // se o IR usa o runtime (canais/goroutines), compila e linka o vader_rt.c
     if ir.contains("@vader_") {
         let rt = dir.join("vader_rt.c");
-        if let Err(e) = std::fs::write(&rt, RUNTIME_C) {
-            eprintln!("error: cannot write runtime: {}", e);
-            return ExitCode::FAILURE;
-        }
+        std::fs::write(&rt, RUNTIME_C).map_err(|e| format!("write runtime: {}", e))?;
         cmd.arg(&rt).arg("-lpthread");
-        println!("(linkando runtime de concorrência)");
+        if !quiet {
+            println!("(linkando runtime de concorrência)");
+        }
     }
-    // se o IR usa o driver de banco (std/db), compila o SQLite uma vez (cache do .o) e linka
     if ir.contains("@vader_db_") {
         let hdr = dir.join("sqlite3.h");
         let obj = dir.join("sqlite3.o");
-        if std::fs::write(&hdr, SQLITE_H).is_err() {
-            eprintln!("error: cannot write sqlite3.h");
-            return ExitCode::FAILURE;
-        }
+        std::fs::write(&hdr, SQLITE_H).map_err(|e| format!("write sqlite3.h: {}", e))?;
         if !obj.exists() {
             let src = dir.join("sqlite3.c");
-            if std::fs::write(&src, SQLITE_C).is_err() {
-                eprintln!("error: cannot write sqlite3.c");
-                return ExitCode::FAILURE;
+            std::fs::write(&src, SQLITE_C).map_err(|e| format!("write sqlite3.c: {}", e))?;
+            if !quiet {
+                println!("(compilando SQLite embarcado — só na primeira vez)");
             }
-            println!("(compilando SQLite embarcado — só na primeira vez)");
             let st = Command::new("clang")
                 .arg("-c")
                 .arg("-O2")
@@ -422,49 +405,36 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
                 .status();
             match st {
                 Ok(s) if s.success() => {}
-                _ => {
-                    eprintln!("clang falhou ao compilar o SQLite");
-                    return ExitCode::FAILURE;
-                }
+                _ => return Err("clang falhou ao compilar o SQLite".into()),
             }
         }
         let db_c = dir.join("vader_db.c");
         let pg_c = dir.join("vader_pg.c");
-        if std::fs::write(&db_c, VADER_DB_C).is_err() || std::fs::write(&pg_c, VADER_PG_C).is_err()
-        {
-            eprintln!("error: cannot write db runtime");
-            return ExitCode::FAILURE;
-        }
+        std::fs::write(&db_c, VADER_DB_C).map_err(|e| format!("write vader_db.c: {}", e))?;
+        std::fs::write(&pg_c, VADER_PG_C).map_err(|e| format!("write vader_pg.c: {}", e))?;
         cmd.arg(&obj)
             .arg(&db_c)
             .arg(&pg_c)
             .arg("-lpthread")
             .arg("-ldl")
             .arg("-lm");
-        println!("(linkando SQLite embarcado + driver Postgres)");
+        if !quiet {
+            println!("(linkando SQLite embarcado + driver Postgres)");
+        }
     }
     cmd.arg("-o").arg(&bin);
-    let compile = cmd.status();
-    match compile {
+    match cmd.status() {
         Ok(s) if s.success() => {}
-        Ok(_) => {
-            eprintln!("clang falhou ao compilar o IR");
-            return ExitCode::FAILURE;
-        }
-        Err(e) => {
-            eprintln!("error: falha ao invocar `clang`: {} (clang está no PATH?)", e);
-            return ExitCode::FAILURE;
-        }
+        Ok(_) => return Err("clang falhou ao compilar o IR".into()),
+        Err(e) => return Err(format!("falha ao invocar `clang`: {} (no PATH?)", e)),
     }
-    println!("compiled with clang -> {}", bin.display());
-    println!("--- running ---");
+    if !quiet {
+        println!("compiled with clang -> {}\n--- running ---", bin.display());
+    }
     match Command::new(&bin).status() {
-        Ok(s) if s.success() => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
-        Err(e) => {
-            eprintln!("error: falha ao rodar o binário: {}", e);
-            ExitCode::FAILURE
-        }
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("o programa saiu com código {}", s.code().unwrap_or(-1))),
+        Err(e) => Err(format!("falha ao rodar o binário: {}", e)),
     }
 }
 
@@ -487,8 +457,8 @@ fn cmd_migrate(args: &[String]) -> ExitCode {
             }
         },
         Some("status") => migrate::status(),
-        Some("up") => migrate::up(),
-        Some("down") => migrate::down(),
+        Some("up") => migrate_run(args, true),
+        Some("down") => migrate_run(args, false),
         _ => {
             usage();
             return ExitCode::FAILURE;
@@ -501,6 +471,90 @@ fn cmd_migrate(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Executa migrations de verdade: gera um programinha Vader que abre o banco e roda o
+/// SQL via `db.must` (aborta se o SQL falhar), compila e roda. Só marca como aplicada
+/// se o processo sair com sucesso.
+fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
+    let dsn = resolve_migrate_dsn(args).ok_or(
+        "informe o banco: `vader migrate up --db <dsn>` ou defina [database] url no vader.toml",
+    )?;
+    if up {
+        let pend = migrate::pending();
+        if pend.is_empty() {
+            println!("nada pendente — tudo aplicado.");
+            return Ok(());
+        }
+        for name in pend {
+            println!("\u{25B6} aplicando {} ...", name);
+            build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true)
+                .map_err(|e| format!("falha em {}: {}", name, e))?;
+            migrate::mark_applied(&name)?;
+        }
+        println!("ok — migrations aplicadas em {}", dsn);
+    } else {
+        match migrate::last_applied() {
+            None => println!("nenhuma migration aplicada."),
+            Some(name) => {
+                println!("\u{25C0} revertendo {} ...", name);
+                build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true)
+                    .map_err(|e| format!("falha ao reverter {}: {}", name, e))?;
+                migrate::unmark(&name)?;
+                println!("ok — revertida {}", name);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve o DSN do banco: flag `--db <dsn>` ou `[database] url` no `vader.toml`.
+fn resolve_migrate_dsn(args: &[String]) -> Option<String> {
+    if let Some(i) = args.iter().position(|a| a == "--db") {
+        return args.get(i + 1).cloned();
+    }
+    let toml = std::fs::read_to_string("vader.toml").ok()?;
+    let mut in_db = false;
+    for line in toml.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_db = t == "[database]";
+            continue;
+        }
+        if in_db {
+            if let Some((k, v)) = t.split_once('=') {
+                if k.trim() == "url" {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Escapa uma string pra um literal Vader.
+fn esc_vd(s: &str) -> String {
+    let mut o = String::new();
+    for c in s.chars() {
+        match c {
+            '\\' => o.push_str("\\\\"),
+            '"' => o.push_str("\\\""),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+/// Gera o programa Vader que aplica um bloco de SQL num banco (via `db.must`).
+fn migration_program(dsn: &str, sql: &str) -> String {
+    format!(
+        "import \"std/db\"\npublic fn main() {{\n    DB __c = db.open(\"{}\")\n    db.must(__c, \"{}\")\n    db.close(__c)\n}}\n",
+        esc_vd(dsn),
+        esc_vd(sql)
+    )
 }
 
 /// `vader template <list|save ...>`
