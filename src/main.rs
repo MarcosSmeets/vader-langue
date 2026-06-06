@@ -23,6 +23,8 @@ const VADER_MYSQL_C: &str = include_str!("../runtime/vader_mysql.c");
 /// stdlib: HTTP (server + client) and JSON (parse/encode), linked on demand.
 const VADER_HTTP_C: &str = include_str!("../runtime/vader_http.c");
 const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
+/// HTTP router (newRouter + r.get/post + serve).
+const VADER_ROUTER_C: &str = include_str!("../runtime/vader_router.c");
 /// Arena/region allocator (long-lived service memory): bump-alloc per scope.
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 /// std/os and std/env: access to the process environment.
@@ -458,15 +460,20 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot read `{}`: {}", path, e);
-            return ExitCode::FAILURE;
+    let tls = args.iter().any(|a| a == "--tls");
+    // A directory builds the whole project natively (flattened by the module system).
+    let result = if Path::new(path).is_dir() {
+        match module::load(path, false) {
+            Ok(program) => build_run_program(&program, false, tls),
+            Err(e) => Err(e),
+        }
+    } else {
+        match std::fs::read_to_string(path) {
+            Ok(source) => build_run_source(&source, false, tls),
+            Err(e) => Err(format!("cannot read `{}`: {}", path, e)),
         }
     };
-    let tls = args.iter().any(|a| a == "--tls");
-    match build_run_source(&source, false, tls) {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{}", e);
@@ -488,7 +495,13 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
             .collect();
         module::normalize(&mut program, &packages);
     }
-    if let Err(errors) = check::check(&program) {
+    build_run_program(&program, quiet, tls)
+}
+
+/// Type-checks, generates LLVM IR, compiles with clang and runs. Used by
+/// `vader llvm <file|dir>` and `vader migrate`.
+fn build_run_program(program: &Program, quiet: bool, tls: bool) -> Result<(), String> {
+    if let Err(errors) = check::check(program) {
         let msg = errors
             .iter()
             .map(|e| format!("{}:{}: {}", e.line, e.col, e.message))
@@ -496,7 +509,7 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
             .join("; ");
         return Err(format!("type error: {}", msg));
     }
-    let ir = llvm::generate(&program)?;
+    let ir = llvm::generate(program)?;
 
     let dir = std::env::temp_dir().join("vader_llvm");
     std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
@@ -560,10 +573,15 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
             println!("(linking SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
         }
     }
-    if ir.contains("@vader_http_") {
+    if ir.contains("@vader_http_") || ir.contains("@vader_router_") {
         let c = dir.join("vader_http.c");
         std::fs::write(&c, VADER_HTTP_C).map_err(|e| format!("write vader_http.c: {}", e))?;
         cmd.arg(&c);
+        if ir.contains("@vader_router_") {
+            let rc = dir.join("vader_router.c");
+            std::fs::write(&rc, VADER_ROUTER_C).map_err(|e| format!("write vader_router.c: {}", e))?;
+            cmd.arg(&rc);
+        }
         if !quiet {
             println!("(linking std/http)");
         }

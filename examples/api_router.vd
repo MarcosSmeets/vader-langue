@@ -1,0 +1,21 @@
+// HTTP router the familiar way: newRouter() then register handlers, then serve.
+import "std/http"
+import "std/json"
+
+public fn listUsers(s Server) {
+    Json arr = json.array()
+    json.add_str(arr, "Marco")
+    json.add_str(arr, "Vader")
+    http.respond(s, 200, "application/json", json.encode(arr))
+}
+
+public fn createUser(s Server) {
+    http.respond(s, 201, "application/json", "{\"status\":\"created\"}")
+}
+
+public fn main() {
+    Router r = newRouter()
+    r.get("/users", listUsers)
+    r.post("/users", createUser)
+    serve(8095, r)
+}

@@ -43,6 +43,8 @@ struct Gen {
     chan_elems: HashMap<String, String>,
     /// map variables -> (is the key a string?, LLVM type of the value)
     map_types: HashMap<String, (bool, String)>,
+    /// variables whose declared type is `Router` (enables `r.get/post/...` dispatch)
+    router_vars: HashSet<String>,
     /// goroutine thunks to generate: (name, target function, arg types)
     pending_thunks: Vec<(String, String, Vec<String>)>,
     thunk_count: usize,
@@ -100,6 +102,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         pending: Vec::new(),
         chan_elems: HashMap::new(),
         map_types: HashMap::new(),
+        router_vars: HashSet::new(),
         pending_thunks: Vec::new(),
         thunk_count: 0,
         has_db: program.imports.iter().any(|i| i.starts_with("std/db")),
@@ -306,7 +309,10 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare i8* @vader_http_header(i8*, i8*)\n\
              declare void @vader_http_respond(i8*, i64, i8*, i8*)\n\
              declare i8* @vader_http_get(i8*)\n\
-             declare i8* @vader_http_post(i8*, i8*, i8*)\n",
+             declare i8* @vader_http_post(i8*, i8*, i8*)\n\
+             declare i8* @vader_router_new()\n\
+             declare void @vader_router_add(i8*, i8*, i8*, i8*)\n\
+             declare void @vader_router_serve(i64, i8*)\n",
         );
     }
     if g.needs.json {
@@ -410,7 +416,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" | "Server" | "Json" | "Arena" => "i8*".to_string(), // opaque stdlib handles
+                "DB" | "Rows" | "Server" | "Json" | "Arena" | "Router" => "i8*".to_string(), // opaque stdlib handles
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -525,6 +531,7 @@ impl Gen {
         self.tmp = 0;
         self.label = 0;
         self.vars.clear();
+        self.router_vars.clear();
         self.chan_elems.clear();
         self.map_types.clear();
         self.terminated = false;
@@ -779,6 +786,9 @@ impl Gen {
                 let e = self.ty_of(&args[0])?;
                 self.chan_elems.insert(decls[0].name.clone(), e);
             }
+        }
+        if matches!(&decls[0].ty, Type::Named(n) if n == "Router") {
+            self.router_vars.insert(decls[0].name.clone());
         }
         Ok(())
     }
@@ -1129,14 +1139,19 @@ impl Gen {
                 Ok((p, "i8*".to_string()))
             }
             ExprKind::Ident(n) => {
-                let (addr, ty) = self
-                    .vars
-                    .get(n)
-                    .cloned()
-                    .ok_or(format!("LLVM backend: unknown variable `{}`", n))?;
-                let t = self.fresh();
-                self.emit(&format!("{} = load {}, {}* {}", t, ty, ty, addr));
-                Ok((t, ty))
+                if let Some((addr, ty)) = self.vars.get(n).cloned() {
+                    let t = self.fresh();
+                    self.emit(&format!("{} = load {}, {}* {}", t, ty, ty, addr));
+                    Ok((t, ty))
+                } else if let Some((params, ret)) = self.funcs.get(n).cloned() {
+                    // function used as a value -> pointer to the function (as i8*)
+                    let fnty = format!("{} ({})*", ret, params.join(", "));
+                    let r = self.fresh();
+                    self.emit(&format!("{} = bitcast {} @{} to i8*", r, fnty, n));
+                    Ok((r, "i8*".to_string()))
+                } else {
+                    Err(format!("LLVM backend: unknown variable `{}`", n))
+                }
             }
             ExprKind::Unary { op, expr } => {
                 let (v, t) = self.gen_expr(expr)?;
@@ -1449,6 +1464,8 @@ impl Gen {
             "respond" => ("vader_http_respond", "void", &["i8*", "i64", "i8*", "i8*"]),
             "get" => ("vader_http_get", "i8*", &["i8*"]),
             "post" => ("vader_http_post", "i8*", &["i8*", "i8*", "i8*"]),
+            "newRouter" => ("vader_router_new", "i8*", &[]),
+            "serve" => ("vader_router_serve", "void", &["i64", "i8*"]),
             _ => return Ok(None),
         };
         self.needs.http = true;
@@ -1588,6 +1605,28 @@ impl Gen {
             }
         }
         if let ExprKind::Field { base, field } = &callee.kind {
+            // Router methods: r.get/post/put/delete/patch("/path", handler) -> register a route
+            if let ExprKind::Ident(bn) = &base.kind {
+                if self.router_vars.contains(bn) {
+                    let verb = match field.as_str() {
+                        "get" => "GET",
+                        "post" => "POST",
+                        "put" => "PUT",
+                        "delete" => "DELETE",
+                        "patch" => "PATCH",
+                        other => return Err(format!("LLVM backend: unknown Router method `{}`", other)),
+                    };
+                    self.needs.http = true;
+                    let (rv, _) = self.gen_expr(base)?;
+                    let mp = self.string_ptr(verb);
+                    let mut argstrs = vec![format!("i8* {}", rv), format!("i8* {}", mp)];
+                    for a in args {
+                        let (v, _t) = self.gen_expr(a)?;
+                        argstrs.push(format!("i8* {}", v));
+                    }
+                    return self.emit_call("void", "@vader_router_add", &argstrs);
+                }
+            }
             let (bv, bt) = self.gen_expr(base)?;
             let tyname = bt.trim_start_matches('%').to_string();
             // dynamic interface dispatch (vtable)
@@ -2239,6 +2278,27 @@ mod tests {
         assert!(out.contains("call i8* @vader_json_object"));
         assert!(out.contains("@vader_json_encode"));
         assert!(out.contains("declare i8* @vader_http_get"));
+    }
+
+    #[test]
+    fn emits_router_and_function_values() {
+        use crate::module;
+        use std::collections::HashSet;
+        let src = "import \"std/http\"\n\
+                   public fn h(s Server) { http.respond(s, 200, \"text/plain\", \"hi\") }\n\
+                   public fn main() {\n\
+                   Router r = newRouter()\n\
+                   r.get(\"/x\", h)\n\
+                   serve(8080, r)\n\
+                   }";
+        let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
+        let pkgs: HashSet<String> = ["http".to_string()].into_iter().collect();
+        module::normalize(&mut prog, &pkgs);
+        let out = generate(&prog).unwrap();
+        assert!(out.contains("call i8* @vader_router_new"));
+        assert!(out.contains("bitcast void (i8*)* @h to i8*")); // function as a value
+        assert!(out.contains("@vader_router_add"));
+        assert!(out.contains("call void @vader_router_serve"));
     }
 
     #[test]

@@ -70,7 +70,7 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
         enums: HashSet::new(),
         interfaces: HashSet::new(),
         type_params: HashSet::new(),
-        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena"]
+        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena", "Router"]
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -203,7 +203,7 @@ impl Checker {
         // std/http: server (Server -> Unknown) + client.
         if program.imports.iter().any(|i| i.starts_with("std/http")) {
             use Ty::*;
-            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 11] = [
                 ("listen", vec![Int], vec![Unknown]),
                 ("accept", vec![Unknown], vec![Bool]),
                 ("method", vec![Unknown], vec![String]),
@@ -213,6 +213,8 @@ impl Checker {
                 ("respond", vec![Unknown, Int, String, String], vec![]),
                 ("get", vec![String], vec![String]),
                 ("post", vec![String, String, String], vec![String]),
+                ("newRouter", vec![], vec![Unknown]),
+                ("serve", vec![Int, Unknown], vec![]),
             ];
             for (name, params, returns) in sigs {
                 self.functions
