@@ -20,6 +20,9 @@ const VADER_DB_C: &str = include_str!("../runtime/vader_db.c");
 const VADER_PG_C: &str = include_str!("../runtime/vader_pg.c");
 /// Driver MySQL/MariaDB (protocolo nativo + mysql_native_password).
 const VADER_MYSQL_C: &str = include_str!("../runtime/vader_mysql.c");
+/// stdlib: HTTP (servidor + cliente) e JSON (parse/encode), linkados sob demanda.
+const VADER_HTTP_C: &str = include_str!("../runtime/vader_http.c");
+const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
 
 use vader::ast::Program;
 use vader::{
@@ -547,6 +550,22 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
         cmd.arg("-lpthread").arg("-ldl").arg("-lm");
         if !quiet {
             println!("(linkando SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
+        }
+    }
+    if ir.contains("@vader_http_") {
+        let c = dir.join("vader_http.c");
+        std::fs::write(&c, VADER_HTTP_C).map_err(|e| format!("write vader_http.c: {}", e))?;
+        cmd.arg(&c);
+        if !quiet {
+            println!("(linkando std/http)");
+        }
+    }
+    if ir.contains("@vader_json_") {
+        let c = dir.join("vader_json.c");
+        std::fs::write(&c, VADER_JSON_C).map_err(|e| format!("write vader_json.c: {}", e))?;
+        cmd.arg(&c);
+        if !quiet {
+            println!("(linkando std/json)");
         }
     }
     cmd.arg("-o").arg(&bin);

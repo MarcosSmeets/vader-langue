@@ -48,6 +48,8 @@ struct Gen {
     thunk_count: usize,
     /// projeto importa `std/db`? (habilita o despacho das intrínsecas do driver)
     has_db: bool,
+    has_http: bool,
+    has_json: bool,
     needs: Needs,
 }
 
@@ -61,6 +63,8 @@ struct Needs {
     chan: bool,
     map: bool,
     db: bool,
+    http: bool,
+    json: bool,
 }
 
 enum MatchMode {
@@ -95,6 +99,8 @@ pub fn generate(program: &Program) -> Result<String, String> {
         pending_thunks: Vec::new(),
         thunk_count: 0,
         has_db: program.imports.iter().any(|i| i.starts_with("std/db")),
+        has_http: program.imports.iter().any(|i| i.starts_with("std/http")),
+        has_json: program.imports.iter().any(|i| i.starts_with("std/json")),
         needs: Needs::default(),
     };
 
@@ -284,6 +290,42 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare void @vader_db_close(i8*)\n",
         );
     }
+    if g.needs.http {
+        result.push_str(
+            "declare i8* @vader_http_listen(i64)\n\
+             declare i32 @vader_http_accept(i8*)\n\
+             declare i8* @vader_http_method(i8*)\n\
+             declare i8* @vader_http_path(i8*)\n\
+             declare i8* @vader_http_body(i8*)\n\
+             declare i8* @vader_http_header(i8*, i8*)\n\
+             declare void @vader_http_respond(i8*, i64, i8*, i8*)\n\
+             declare i8* @vader_http_get(i8*)\n\
+             declare i8* @vader_http_post(i8*, i8*, i8*)\n",
+        );
+    }
+    if g.needs.json {
+        result.push_str(
+            "declare i8* @vader_json_parse(i8*)\n\
+             declare i8* @vader_json_field(i8*, i8*)\n\
+             declare i8* @vader_json_elem(i8*, i32)\n\
+             declare i8* @vader_json_as_str(i8*)\n\
+             declare i64 @vader_json_as_int(i8*)\n\
+             declare double @vader_json_as_float(i8*)\n\
+             declare i32 @vader_json_as_bool(i8*)\n\
+             declare i64 @vader_json_count(i8*)\n\
+             declare i8* @vader_json_object()\n\
+             declare i8* @vader_json_array()\n\
+             declare i8* @vader_json_set(i8*, i8*, i8*)\n\
+             declare i8* @vader_json_set_str(i8*, i8*, i8*)\n\
+             declare i8* @vader_json_set_int(i8*, i8*, i64)\n\
+             declare i8* @vader_json_set_float(i8*, i8*, double)\n\
+             declare i8* @vader_json_set_bool(i8*, i8*, i32)\n\
+             declare i8* @vader_json_add(i8*, i8*)\n\
+             declare i8* @vader_json_add_str(i8*, i8*)\n\
+             declare i8* @vader_json_add_int(i8*, i64)\n\
+             declare i8* @vader_json_encode(i8*)\n",
+        );
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -324,7 +366,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" => "i8*".to_string(), // handles opacos do std/db
+                "DB" | "Rows" | "Server" | "Json" => "i8*".to_string(), // handles opacos da stdlib
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -1326,8 +1368,7 @@ impl Gen {
         name: &str,
         args: &[Expr],
     ) -> Result<Option<(String, String)>, String> {
-        // (extern, ret lltype, tipos dos params C)
-        let (extern_name, ret, ptys): (&str, &str, &[&str]) = match name {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
             "open" => ("vader_db_open", "i8*", &["i8*"]),
             "exec" => ("vader_db_exec", "i8*", &["i8*", "i8*"]),
             "must" => ("vader_db_must", "void", &["i8*", "i8*"]),
@@ -1340,14 +1381,83 @@ impl Gen {
             _ => return Ok(None),
         };
         self.needs.db = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrínsecas de `std/http` (servidor + cliente).
+    fn gen_http_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "listen" => ("vader_http_listen", "i8*", &["i64"]),
+            "accept" => ("vader_http_accept", "i1", &["i8*"]),
+            "method" => ("vader_http_method", "i8*", &["i8*"]),
+            "path" => ("vader_http_path", "i8*", &["i8*"]),
+            "body" => ("vader_http_body", "i8*", &["i8*"]),
+            "header" => ("vader_http_header", "i8*", &["i8*", "i8*"]),
+            "respond" => ("vader_http_respond", "void", &["i8*", "i64", "i8*", "i8*"]),
+            "get" => ("vader_http_get", "i8*", &["i8*"]),
+            "post" => ("vader_http_post", "i8*", &["i8*", "i8*", "i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.http = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrínsecas de `std/json` (parse + acessores + builder + encode).
+    fn gen_json_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "parse" => ("vader_json_parse", "i8*", &["i8*"]),
+            "field" => ("vader_json_field", "i8*", &["i8*", "i8*"]),
+            "elem" => ("vader_json_elem", "i8*", &["i8*", "i32"]),
+            "as_str" => ("vader_json_as_str", "i8*", &["i8*"]),
+            "as_int" => ("vader_json_as_int", "i64", &["i8*"]),
+            "as_float" => ("vader_json_as_float", "double", &["i8*"]),
+            "as_bool" => ("vader_json_as_bool", "i1", &["i8*"]),
+            "count" => ("vader_json_count", "i64", &["i8*"]),
+            "object" => ("vader_json_object", "i8*", &[]),
+            "array" => ("vader_json_array", "i8*", &[]),
+            "set" => ("vader_json_set", "i8*", &["i8*", "i8*", "i8*"]),
+            "set_str" => ("vader_json_set_str", "i8*", &["i8*", "i8*", "i8*"]),
+            "set_int" => ("vader_json_set_int", "i8*", &["i8*", "i8*", "i64"]),
+            "set_float" => ("vader_json_set_float", "i8*", &["i8*", "i8*", "double"]),
+            "set_bool" => ("vader_json_set_bool", "i8*", &["i8*", "i8*", "i32"]),
+            "add" => ("vader_json_add", "i8*", &["i8*", "i8*"]),
+            "add_str" => ("vader_json_add_str", "i8*", &["i8*", "i8*"]),
+            "add_int" => ("vader_json_add_int", "i8*", &["i8*", "i64"]),
+            "encode" => ("vader_json_encode", "i8*", &["i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.json = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Emite uma chamada a uma função externa (runtime C). Coage args (i64->i32,
+    /// i1->i32) e converte o retorno (i1<-i32 via icmp; void; senão direto).
+    fn emit_extern(
+        &mut self,
+        extern_name: &str,
+        ret: &str,
+        ptys: &[&str],
+        args: &[Expr],
+    ) -> Result<(String, String), String> {
         let mut argstrs = Vec::new();
         for (i, a) in args.iter().enumerate() {
             let (v, t) = self.gen_expr(a)?;
             let pty = ptys.get(i).copied().unwrap_or("i8*");
-            // índice de coluna: Vader int (i64) -> i32 do C
             let v = if t == "i64" && pty == "i32" {
                 let r = self.fresh();
                 self.emit(&format!("{} = trunc i64 {} to i32", r, v));
+                r
+            } else if t == "i1" && pty == "i32" {
+                let r = self.fresh();
+                self.emit(&format!("{} = zext i1 {} to i32", r, v));
                 r
             } else {
                 v
@@ -1355,21 +1465,20 @@ impl Gen {
             argstrs.push(format!("{} {}", pty, v));
         }
         let joined = argstrs.join(", ");
-        // `next` retorna i32 no C; trunca pra i1 (bool) p/ usar no `for`
-        if name == "next" {
+        if ret == "i1" {
             let r = self.fresh();
             self.emit(&format!("{} = call i32 @{}({})", r, extern_name, joined));
             let b = self.fresh();
             self.emit(&format!("{} = icmp ne i32 {}, 0", b, r));
-            return Ok(Some((b, "i1".to_string())));
+            return Ok((b, "i1".to_string()));
         }
         if ret == "void" {
             self.emit(&format!("call void @{}({})", extern_name, joined));
-            return Ok(Some(("0".to_string(), "void".to_string())));
+            return Ok(("0".to_string(), "void".to_string()));
         }
         let r = self.fresh();
         self.emit(&format!("{} = call {} @{}({})", r, ret, extern_name, joined));
-        Ok(Some((r, ret.to_string())))
+        Ok((r, ret.to_string()))
     }
 
     fn gen_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<(String, String), String> {
@@ -1453,9 +1562,19 @@ impl Gen {
             ExprKind::Ident(n) => n.clone(),
             _ => return Err("backend LLVM: chamada complexa não suportada".into()),
         };
-        // intrínsecas do std/db (têm prioridade — `close` aqui é do banco, não de canal)
+        // intrínsecas da stdlib (têm prioridade — `close` aqui é do banco, não de canal)
         if self.has_db {
             if let Some(r) = self.gen_db_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_http {
+            if let Some(r) = self.gen_http_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_json {
+            if let Some(r) = self.gen_json_call(&name, args)? {
                 return Ok(r);
             }
         }
@@ -2007,6 +2126,31 @@ mod tests {
         assert!(out.contains("call i8* @vader_db_query"));
         assert!(out.contains("call i64 @vader_db_col_int"));
         assert!(out.contains("call void @vader_db_close"));
+    }
+
+    #[test]
+    fn emits_http_and_json() {
+        use crate::module;
+        use std::collections::HashSet;
+        let src = "import \"std/http\"\n\
+                   import \"std/json\"\n\
+                   public fn main() {\n\
+                   Server s = http.listen(8080)\n\
+                   for http.accept(s) {\n\
+                   Json o = json.object()\n\
+                   json.set_str(o, \"p\", http.path(s))\n\
+                   http.respond(s, 200, \"application/json\", json.encode(o))\n\
+                   }\n\
+                   }";
+        let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
+        let pkgs: HashSet<String> = ["http".to_string(), "json".to_string()].into_iter().collect();
+        module::normalize(&mut prog, &pkgs);
+        let out = generate(&prog).unwrap();
+        assert!(out.contains("call i8* @vader_http_listen"));
+        assert!(out.contains("@vader_http_respond"));
+        assert!(out.contains("call i8* @vader_json_object"));
+        assert!(out.contains("@vader_json_encode"));
+        assert!(out.contains("declare i8* @vader_http_get"));
     }
 
     #[test]

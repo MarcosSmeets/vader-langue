@@ -158,6 +158,58 @@ impl Checker {
             }
         }
 
+        // std/http: servidor (Server -> Unknown) + cliente.
+        if program.imports.iter().any(|i| i.starts_with("std/http")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
+                ("listen", vec![Int], vec![Unknown]),
+                ("accept", vec![Unknown], vec![Bool]),
+                ("method", vec![Unknown], vec![String]),
+                ("path", vec![Unknown], vec![String]),
+                ("body", vec![Unknown], vec![String]),
+                ("header", vec![Unknown, String], vec![String]),
+                ("respond", vec![Unknown, Int, String, String], vec![]),
+                ("get", vec![String], vec![String]),
+                ("post", vec![String, String, String], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions
+                    .entry(name.to_string())
+                    .or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/json: parse + acessores + builder + encode (Json -> Unknown).
+        if program.imports.iter().any(|i| i.starts_with("std/json")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 19] = [
+                ("parse", vec![String], vec![Unknown]),
+                ("field", vec![Unknown, String], vec![Unknown]),
+                ("elem", vec![Unknown, Int], vec![Unknown]),
+                ("as_str", vec![Unknown], vec![String]),
+                ("as_int", vec![Unknown], vec![Int]),
+                ("as_float", vec![Unknown], vec![Float]),
+                ("as_bool", vec![Unknown], vec![Bool]),
+                ("count", vec![Unknown], vec![Int]),
+                ("object", vec![], vec![Unknown]),
+                ("array", vec![], vec![Unknown]),
+                ("set", vec![Unknown, String, Unknown], vec![Unknown]),
+                ("set_str", vec![Unknown, String, String], vec![Unknown]),
+                ("set_int", vec![Unknown, String, Int], vec![Unknown]),
+                ("set_float", vec![Unknown, String, Float], vec![Unknown]),
+                ("set_bool", vec![Unknown, String, Bool], vec![Unknown]),
+                ("add", vec![Unknown, Unknown], vec![Unknown]),
+                ("add_str", vec![Unknown, String], vec![Unknown]),
+                ("add_int", vec![Unknown, Int], vec![Unknown]),
+                ("encode", vec![Unknown], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions
+                    .entry(name.to_string())
+                    .or_insert(FnSig { params, returns });
+            }
+        }
+
         // Pass 3: check bodies.
         for item in &program.items {
             match item {

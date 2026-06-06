@@ -1,0 +1,18 @@
+// JSON nativo: parse, acessores e builder + encode.
+import "std/json"
+
+public fn main() {
+    Json j = json.parse("{\"name\": \"Marco\", \"age\": 30, \"tags\": [\"a\", \"b\"]}")
+    string name = json.as_str(json.field(j, "name"))
+    int age = json.as_int(json.field(j, "age"))
+    print(name, age)
+
+    Json out = json.object()
+    json.set_str(out, "lang", "vader")
+    json.set_int(out, "version", 1)
+    Json arr = json.array()
+    json.add_str(arr, "fast")
+    json.add_str(arr, "typed")
+    json.set(out, "traits", arr)
+    print(json.encode(out))
+}

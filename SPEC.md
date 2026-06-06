@@ -167,6 +167,11 @@ pra LLVM mexe só na última caixa.
       `index.json` (dir local ou repo git, sem servidor dedicado); `vader publish` registra o
       pacote no índice. **Verificado** (publish → add por nome → run). Índice central pode ser
       um repo no GitHub (estilo tap).
+- [x] **stdlib `std/http`** — servidor (`listen/accept/method/path/body/header/respond`) +
+      cliente (`get/post`), HTTP/1.1 no runtime C. **Verificado com `curl`** e com o cliente
+      HTTP da própria Vader. Sem TLS no cliente v1.
+- [x] **stdlib `std/json`** — `parse` + acessores (`field/elem/as_str/as_int/as_float/as_bool/count`)
+      + builder (`object/array/set*/add*`) + `encode`, no runtime C. **Verificado** (round-trip).
 
 ### Robustez (em andamento)
 - [x] Posições (linha:coluna) nos erros do type checker

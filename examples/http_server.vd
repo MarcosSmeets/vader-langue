@@ -1,0 +1,14 @@
+// Servidor HTTP nativo respondendo JSON — o pitch de "ótima pra API".
+import "std/http"
+import "std/json"
+
+public fn main() {
+    Server s = http.listen(8081)
+    for http.accept(s) {
+        string p = http.path(s)
+        Json resp = json.object()
+        json.set_str(resp, "path", p)
+        json.set_str(resp, "msg", "ola da Vader")
+        http.respond(s, 200, "application/json", json.encode(resp))
+    }
+}
