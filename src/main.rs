@@ -556,7 +556,8 @@ fn build_run_program(
     }
 
     let mut cmd = Command::new("clang");
-    cmd.arg("-Wno-override-module").arg(&ll);
+    // -O2: the IR we emit is naive; let LLVM optimize it (competitive native code).
+    cmd.arg("-O2").arg("-Wno-override-module").arg(&ll);
     if ir.contains("@vader_") {
         let rt = dir.join("vader_rt.c");
         let mem = dir.join("vader_mem.c");

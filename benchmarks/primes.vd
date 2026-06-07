@@ -1,0 +1,26 @@
+// Count primes below 2,000,000 by trial division — loop and branch micro-benchmark.
+fn isPrime(n int): bool {
+    if n < 2 {
+        return false
+    }
+    int i = 2
+    for i * i <= n {
+        if n % i == 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+public fn main() {
+    int count = 0
+    int n = 2
+    for n < 2000000 {
+        if isPrime(n) {
+            count = count + 1
+        }
+        n = n + 1
+    }
+    print(count)
+}

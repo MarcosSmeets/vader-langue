@@ -1,0 +1,11 @@
+// Recursive Fibonacci — function-call and integer-arithmetic micro-benchmark.
+fn fib(n int): int {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+public fn main() {
+    print(fib(40))
+}

@@ -20,6 +20,7 @@ in the compiler — zero install for the end user.
 ## Table of contents
 
 - [Status](#status)
+- [Benchmarks](#benchmarks)
 - [Install](#install)
 - [VS Code extension](#vs-code-extension)
 - [Quick start](#quick-start)
@@ -28,6 +29,7 @@ in the compiler — zero install for the end user.
 - [Toolchain](#toolchain)
 - [Repository layout](#repository-layout)
 - [Documentation](#documentation)
+- [For LLMs / AI coding](#for-llms--ai-coding)
 - [License](#license)
 
 ---
@@ -45,6 +47,24 @@ Toolchain: `new · gen · fmt · test · lint · migrate · template · add · b
 
 The compiler has **zero external Rust dependencies**, and the database drivers + concurrency
 runtime are embedded C, linked at compile time only when your program uses them.
+
+---
+
+## Benchmarks
+
+Vader emits LLVM IR and lets `clang -O2` optimize it — the same backend `clang` uses for
+C — so compute-bound code runs at native speed. Single-threaded micro-benchmarks, best of
+3 runs, everything built at `-O2` / release on the same machine. Sources and the runner
+live in [`benchmarks/`](benchmarks/) (`bash benchmarks/run.sh`):
+
+| Benchmark      |  Vader |      C |    C++ |   Rust |     Go |
+|----------------|-------:|-------:|-------:|-------:|-------:|
+| `fib(40)`      | 0.341s | 0.323s | 0.316s | 0.331s | 0.596s |
+| primes &lt; 2M | 0.344s | 0.333s | 0.331s | 0.344s | 0.519s |
+
+Vader lands within a few percent of C/C++/Rust and comfortably ahead of Go. These are
+tight compute loops (no allocation or I/O); absolute numbers vary by machine — reproduce
+them with `benchmarks/run.sh`.
 
 ---
 
@@ -519,6 +539,14 @@ vader/
 - [`docs/persistence.md`](docs/persistence.md) — databases & migrations.
 - [`docs/packages.md`](docs/packages.md) — the package manager.
 - [`docs/distribution.md`](docs/distribution.md) — releases, Homebrew, winget, Docker.
+- [`docs/llm-onboarding.md`](docs/llm-onboarding.md) — one-page primer for AI assistants.
+
+## For LLMs / AI coding
+
+Vader is a new language, so AI assistants won't know it out of the box. Instead of pointing
+them at the whole docs, paste [`docs/llm-onboarding.md`](docs/llm-onboarding.md) — a dense,
+self-contained one-pager (syntax, the standard library, idioms, gotchas, and a complete
+REST example) that gets a model writing correct Vader immediately.
 
 ## License
 
