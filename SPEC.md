@@ -185,6 +185,19 @@ to LLVM touches only the last box.
       (alongside `std/http`, `std/db`, `std/json`, `std/env`, `std/mem`, `std/mongo`). Verified
       end-to-end (`examples/stdlib_demo.vd`).
 
+### Memory model
+
+- [x] **Automatic per-iteration arena for loops** — bump-allocation with a region reset at the
+      end of each `for` iteration (while / range / slice). A conservative, **sound** escape
+      analysis only enables it when no allocation can outlive the iteration (no return/send/spawn,
+      no write to an outer heap var, no outer heap var passed to a call) — Vader has no mutable
+      globals, so escapes are syntactic. Result: **long-running loops don't leak** and there's
+      **no perf cost** (reset is a pointer bump; pure-compute loops allocate nothing).
+      **Verified**: 1,000,000 JSON allocations in a loop hold peak RSS at ~1.6 MB with correct
+      output; an escaping loop (accumulating into an outer string) stays correct; benchmarks
+      unchanged. Servers/workers keep their per-request/job arenas; `std/mem` is still available
+      for manual control. Cycles/escaping growth are still the program's (or `std/mem`'s) job.
+
 ### Runtime safety
 
 - [x] **Bounds-checked slice/array access** — `xs[i]` (read and write) panics with the source

@@ -366,6 +366,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
     if g.needs.mem {
         result.push_str(
             "declare i8* @vader_scope()\n\
+             declare void @vader_reset(i8*)\n\
              declare void @vader_release(i8*)\n",
         );
     }
@@ -521,6 +522,83 @@ fn hoist_allocas(text: &str) -> String {
         return text.to_string();
     }
     format!("{}{}{}", header, allocas, body)
+}
+
+// ---- loop escape analysis (enables automatic per-iteration arena reset) ----
+use std::collections::HashSet as EscSet;
+
+/// Conservatively true if a loop allocation could outlive the iteration: the body
+/// returns/sends/spawns, assigns into an outer heap var, or names an outer heap var as a
+/// call's receiver/argument. `oh` is the heap vars in scope before the loop.
+fn body_escapes(body: &Block, oh: &EscSet<String>) -> bool {
+    body.stmts.iter().any(|s| stmt_escapes(s, oh))
+}
+
+fn stmt_escapes(s: &Stmt, oh: &EscSet<String>) -> bool {
+    match s {
+        Stmt::Return(_) | Stmt::Send { .. } | Stmt::Spawn(_) => true,
+        Stmt::Assign { target, value } => assign_escapes(target, oh) || expr_escapes(value, oh),
+        Stmt::VarDecl { values, .. } => values.iter().any(|v| expr_escapes(v, oh)),
+        Stmt::If { cond, then_block, else_block } => {
+            expr_escapes(cond, oh)
+                || body_escapes(then_block, oh)
+                || else_block.as_ref().map_or(false, |b| body_escapes(b, oh))
+        }
+        Stmt::For { body, .. } => body_escapes(body, oh),
+        Stmt::Assert(e) | Stmt::Expr(e) => expr_escapes(e, oh),
+    }
+}
+
+fn assign_escapes(target: &Expr, oh: &EscSet<String>) -> bool {
+    match &target.kind {
+        ExprKind::Ident(n) => oh.contains(n),
+        ExprKind::Index { base, .. } | ExprKind::Field { base, .. } => names_outer_heap(base, oh),
+        _ => false,
+    }
+}
+
+fn expr_escapes(e: &Expr, oh: &EscSet<String>) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, args } => {
+            names_outer_heap(callee, oh) || args.iter().any(|a| names_outer_heap(a, oh))
+        }
+        ExprKind::Binary { left, right, .. } => expr_escapes(left, oh) || expr_escapes(right, oh),
+        ExprKind::Unary { expr, .. } => expr_escapes(expr, oh),
+        ExprKind::Index { base, index } => expr_escapes(base, oh) || expr_escapes(index, oh),
+        ExprKind::Field { base, .. } => expr_escapes(base, oh),
+        ExprKind::StructLit { fields, .. } => fields.iter().any(|(_, fe)| expr_escapes(fe, oh)),
+        ExprKind::SliceLit(els) => els.iter().any(|el| expr_escapes(el, oh)),
+        ExprKind::Recv(i) => expr_escapes(i, oh),
+        ExprKind::Match { scrutinee, arms } => {
+            expr_escapes(scrutinee, oh)
+                || arms.iter().any(|arm| match &arm.body {
+                    MatchArmBody::Expr(ex) => expr_escapes(ex, oh),
+                    MatchArmBody::Block(b) => body_escapes(b, oh),
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Does the expression mention an outer heap variable anywhere?
+fn names_outer_heap(e: &Expr, oh: &EscSet<String>) -> bool {
+    match &e.kind {
+        ExprKind::Ident(n) => oh.contains(n),
+        ExprKind::Field { base, .. } => names_outer_heap(base, oh),
+        ExprKind::Index { base, index } => names_outer_heap(base, oh) || names_outer_heap(index, oh),
+        ExprKind::Binary { left, right, .. } => {
+            names_outer_heap(left, oh) || names_outer_heap(right, oh)
+        }
+        ExprKind::Unary { expr, .. } => names_outer_heap(expr, oh),
+        ExprKind::Call { callee, args } => {
+            names_outer_heap(callee, oh) || args.iter().any(|a| names_outer_heap(a, oh))
+        }
+        ExprKind::StructLit { fields, .. } => fields.iter().any(|(_, fe)| names_outer_heap(fe, oh)),
+        ExprKind::SliceLit(els) => els.iter().any(|el| names_outer_heap(el, oh)),
+        ExprKind::Recv(i) => names_outer_heap(i, oh),
+        ExprKind::Match { scrutinee, .. } => names_outer_heap(scrutinee, oh),
+        _ => false,
+    }
 }
 
 impl Gen {
@@ -971,6 +1049,30 @@ impl Gen {
         Ok(())
     }
 
+    /// Heap-typed variables currently in scope. A loop allocation can only escape by
+    /// being written into one of these (Vader has no mutable globals), so a loop body
+    /// that never names an outer heap var (as an assignment target or a call's
+    /// receiver/argument) is safe to run in a per-iteration arena that resets each pass.
+    fn outer_heap_vars(&self) -> std::collections::HashSet<String> {
+        self.vars
+            .iter()
+            .filter(|(_, (_, ty))| !matches!(ty.as_str(), "i64" | "double" | "i1"))
+            .map(|(n, _)| n.clone())
+            .collect()
+    }
+
+    /// Opens a per-iteration arena if the body can't leak across iterations.
+    fn loop_arena_open(&mut self, body: &Block) -> Option<String> {
+        let oh = self.outer_heap_vars();
+        if body_escapes(body, &oh) {
+            return None;
+        }
+        let a = self.fresh();
+        self.emit(&format!("{} = call i8* @vader_scope()", a));
+        self.needs.mem = true;
+        Some(a)
+    }
+
     fn gen_for(&mut self, head: &ForHead, body: &Block) -> Result<(), String> {
         match head {
             ForHead::In { var, iter } => {
@@ -989,6 +1091,7 @@ impl Gen {
                     let body_l = self.fresh_label("loopbody");
                     let end_l = self.fresh_label("loopend");
                     let cmp = if matches!(o, BinOp::RangeIncl) { "sle" } else { "slt" };
+                    let arena = self.loop_arena_open(body);
                     self.br(&cond_l);
                     self.label(&cond_l);
                     let (bound, _) = self.gen_expr(right)?;
@@ -1009,8 +1112,16 @@ impl Gen {
                         self.emit(&format!("{} = add i64 {}, 1", nx, cur));
                         self.emit(&format!("store i64 {}, i64* {}", nx, addr));
                     }
+                    if let Some(a) = &arena {
+                        if !self.terminated {
+                            self.emit(&format!("call void @vader_reset(i8* {})", a));
+                        }
+                    }
                     self.br(&cond_l);
                     self.label(&end_l);
+                    if let Some(a) = &arena {
+                        self.emit(&format!("call void @vader_release(i8* {})", a));
+                    }
                     return Ok(());
                 }
                 // channel iteration: for x in ch  (receives until the channel closes)
@@ -1055,6 +1166,9 @@ impl Gen {
                     return Err("LLVM backend: for-in only over a range or slice".into());
                 }
                 let elemty = Self::slice_elem(&st);
+                // open a per-iteration arena BEFORE the loop var is in scope (so a heap
+                // element var isn't treated as an escaping outer reference).
+                let arena = self.loop_arena_open(body);
                 let ptr = self.fresh();
                 self.emit(&format!("{} = extractvalue {} {}, 0", ptr, st, sv));
                 let len = self.fresh();
@@ -1097,14 +1211,23 @@ impl Gen {
                     self.emit(&format!("{} = add i64 {}, 1", nx, cur));
                     self.emit(&format!("store i64 {}, i64* {}", nx, iaddr));
                 }
+                if let Some(a) = &arena {
+                    if !self.terminated {
+                        self.emit(&format!("call void @vader_reset(i8* {})", a));
+                    }
+                }
                 self.br(&cond_l);
                 self.label(&end_l);
+                if let Some(a) = &arena {
+                    self.emit(&format!("call void @vader_release(i8* {})", a));
+                }
                 Ok(())
             }
             ForHead::While(cond) => {
                 let cond_l = self.fresh_label("whilecond");
                 let body_l = self.fresh_label("whilebody");
                 let end_l = self.fresh_label("whileend");
+                let arena = self.loop_arena_open(body);
                 self.br(&cond_l);
                 self.label(&cond_l);
                 let (c, ct) = self.gen_expr(cond)?;
@@ -1115,8 +1238,16 @@ impl Gen {
                 for st in &body.stmts {
                     self.gen_stmt(st)?;
                 }
+                if let Some(a) = &arena {
+                    if !self.terminated {
+                        self.emit(&format!("call void @vader_reset(i8* {})", a));
+                    }
+                }
                 self.br(&cond_l);
                 self.label(&end_l);
+                if let Some(a) = &arena {
+                    self.emit(&format!("call void @vader_release(i8* {})", a));
+                }
                 Ok(())
             }
             ForHead::Infinite => {
