@@ -160,9 +160,9 @@ to LLVM touches only the last box.
       (fast path) + the full-auth path that RSA-encrypts the password with the server's public
       key (OpenSSL, so the cold-cache first connect needs a `--tls` build). The scramble crypto
       matches a reference vector; the rewritten auth flow is live-verified against MySQL 8.4
-      (auth handshake + AuthSwitch + result loop). The RSA full-auth path compiles under
-      `--tls`; live-verifying it needs `libssl-dev`.
-- [ ] The MySQL caching_sha2 full-auth live test (needs `libssl-dev`) — next phase
+      (auth handshake + AuthSwitch + result loop). The RSA full-auth path (cold cache) is
+      **live-verified** against MySQL 8.4: a fresh caching_sha2 root connects via the
+      RSA-encrypted password and runs create/insert/select. Needs a `--tls` build (OpenSSL).
 - [x] **Mongo driver** (`std/mongo`) — a document API (not SQL): `mongo.connect(dsn)`,
       `mongo.insert(m, coll, doc)`, `mongo.find(m, coll, query): docs`, `mongo.close(m)`.
       Own BSON encoder/decoder (reusing the `vader_json` value tree) + the OP_MSG wire protocol

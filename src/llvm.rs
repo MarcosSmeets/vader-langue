@@ -361,6 +361,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
             "declare i8* @vader_mongo_connect(i8*)\n\
              declare i8* @vader_mongo_insert(i8*, i8*, i8*)\n\
              declare i8* @vader_mongo_find(i8*, i8*, i8*)\n\
+             declare i8* @vader_mongo_aggregate(i8*, i8*, i8*)\n\
              declare i8* @vader_mongo_update(i8*, i8*, i8*, i8*)\n\
              declare i8* @vader_mongo_delete(i8*, i8*, i8*)\n\
              declare void @vader_mongo_close(i8*)\n",
@@ -1570,6 +1571,7 @@ impl Gen {
             "connect" => ("vader_mongo_connect", "i8*", &["i8*"]),
             "insert" => ("vader_mongo_insert", "i8*", &["i8*", "i8*", "i8*"]),
             "find" => ("vader_mongo_find", "i8*", &["i8*", "i8*", "i8*"]),
+            "aggregate" => ("vader_mongo_aggregate", "i8*", &["i8*", "i8*", "i8*"]),
             "update" => ("vader_mongo_update", "i8*", &["i8*", "i8*", "i8*", "i8*"]),
             "delete" => ("vader_mongo_delete", "i8*", &["i8*", "i8*", "i8*"]),
             "close" => ("vader_mongo_close", "void", &["i8*"]),

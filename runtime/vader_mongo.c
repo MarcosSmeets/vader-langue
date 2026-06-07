@@ -410,6 +410,22 @@ void *vader_mongo_find(void *mh, const char *coll, void *query) {
     return batch;
 }
 
+/* runs an aggregation `pipeline` (a JSON array of stages); returns the result array. */
+void *vader_mongo_aggregate(void *mh, const char *coll, void *pipeline) {
+    Mongo *m = mh;
+    if (!m) return vader_json_array();
+    void *cmd = vader_json_object();
+    vader_json_set_str(cmd, "aggregate", coll);
+    vader_json_set(cmd, "pipeline", pipeline);
+    vader_json_set(cmd, "cursor", vader_json_object());  /* empty cursor doc {} */
+    vader_json_set_str(cmd, "$db", m->db);
+    void *reply = op_msg(m, cmd);
+    if (!reply) return vader_json_array();
+    void *batch = vader_json_field(vader_json_field(reply, "cursor"), "firstBatch");
+    if (vader_json_type(batch) != JT_ARR) return vader_json_array();
+    return batch;
+}
+
 /* update documents matching `filter` by applying $set with `changes`. */
 const char *vader_mongo_update(void *mh, const char *coll, void *filter, void *changes) {
     Mongo *m = mh;
