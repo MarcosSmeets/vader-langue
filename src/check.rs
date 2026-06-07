@@ -301,6 +301,110 @@ impl Checker {
             }
         }
 
+        // std/strings
+        if program.imports.iter().any(|i| i.starts_with("std/strings")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 15] = [
+                ("length", vec![String], vec![Int]),
+                ("upper", vec![String], vec![String]),
+                ("lower", vec![String], vec![String]),
+                ("trim", vec![String], vec![String]),
+                ("contains", vec![String, String], vec![Bool]),
+                ("index_of", vec![String, String], vec![Int]),
+                ("starts_with", vec![String, String], vec![Bool]),
+                ("ends_with", vec![String, String], vec![Bool]),
+                ("substring", vec![String, Int, Int], vec![String]),
+                ("repeat", vec![String, Int], vec![String]),
+                ("replace", vec![String, String, String], vec![String]),
+                ("to_int", vec![String], vec![Int]),
+                ("to_float", vec![String], vec![Float]),
+                ("split", vec![String, String], vec![Unknown]),
+                ("join", vec![Unknown, String], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions.entry(name.to_string()).or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/math
+        if program.imports.iter().any(|i| i.starts_with("std/math")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 19] = [
+                ("sqrt", vec![Float], vec![Float]),
+                ("pow", vec![Float, Float], vec![Float]),
+                ("abs", vec![Float], vec![Float]),
+                ("floor", vec![Float], vec![Float]),
+                ("ceil", vec![Float], vec![Float]),
+                ("round", vec![Float], vec![Float]),
+                ("sin", vec![Float], vec![Float]),
+                ("cos", vec![Float], vec![Float]),
+                ("tan", vec![Float], vec![Float]),
+                ("log", vec![Float], vec![Float]),
+                ("exp", vec![Float], vec![Float]),
+                ("fmin", vec![Float, Float], vec![Float]),
+                ("fmax", vec![Float, Float], vec![Float]),
+                ("pi", vec![], vec![Float]),
+                ("abs_int", vec![Int], vec![Int]),
+                ("min", vec![Int, Int], vec![Int]),
+                ("max", vec![Int, Int], vec![Int]),
+                ("random", vec![], vec![Float]),
+                ("random_int", vec![Int], vec![Int]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions.entry(name.to_string()).or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/time
+        if program.imports.iter().any(|i| i.starts_with("std/time")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 10] = [
+                ("now", vec![], vec![Int]),
+                ("now_ms", vec![], vec![Int]),
+                ("sleep", vec![Int], vec![]),
+                ("format", vec![Int], vec![String]),
+                ("year", vec![Int], vec![Int]),
+                ("month", vec![Int], vec![Int]),
+                ("day", vec![Int], vec![Int]),
+                ("hour", vec![Int], vec![Int]),
+                ("minute", vec![Int], vec![Int]),
+                ("second", vec![Int], vec![Int]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions.entry(name.to_string()).or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/fs
+        if program.imports.iter().any(|i| i.starts_with("std/fs")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 6] = [
+                ("read_file", vec![String], vec![String]),
+                ("write_file", vec![String, String], vec![Bool]),
+                ("append_file", vec![String, String], vec![Bool]),
+                ("exists", vec![String], vec![Bool]),
+                ("remove", vec![String], vec![Bool]),
+                ("read_line", vec![], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions.entry(name.to_string()).or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/fmt
+        if program.imports.iter().any(|i| i.starts_with("std/fmt")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 4] = [
+                ("from_int", vec![Int], vec![String]),
+                ("from_float", vec![Float], vec![String]),
+                ("from_bool", vec![Bool], vec![String]),
+                ("pad_left", vec![String, Int, String], vec![String]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions.entry(name.to_string()).or_insert(FnSig { params, returns });
+            }
+        }
+
         // Pass 3: check bodies.
         for item in &program.items {
             match item {

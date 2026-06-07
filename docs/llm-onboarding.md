@@ -161,6 +161,24 @@ mongo.delete(m, "users", filter)                 // delete docs matching `filter
 mongo.close(m)
 ```
 
+**std/strings** — `strings.length(s)`, `upper`/`lower`/`trim(s)`, `contains(s,sub)`,
+`index_of(s,sub)` (-1 if absent), `starts_with`/`ends_with(s,x)`, `substring(s,start,end)`,
+`repeat(s,n)`, `replace(s,old,new)`, `to_int(s)`/`to_float(s)`, `split(s,sep): []string`,
+`join(parts []string, sep): string`.
+
+**std/math** — `sqrt/abs/floor/ceil/round/sin/cos/tan/log/exp(x)`, `pow(b,e)`,
+`fmin/fmax(a,b)` (float), `pi()`, `abs_int(n)`, `min/max(a,b)` (int), `random(): float`,
+`random_int(n): int`.
+
+**std/fmt** — `from_int(n)`, `from_float(f)`, `from_bool(b)` → string; `pad_left(s,width,ch)`.
+Use these to build strings: `"count: " + fmt.from_int(n)`.
+
+**std/time** — `now(): int` (unix s), `now_ms()`, `sleep(ms)`, `format(ts): string`,
+`year/month/day/hour/minute/second(ts): int`.
+
+**std/fs** — `read_file(path): string`, `write_file/append_file(path, content): bool`,
+`exists(path)`, `remove(path)`, `read_line(): string` (one line from stdin).
+
 **std/env** — `string v = env.read("DATABASE_URL")` (empty string if unset).
 
 **std/mem** — arena memory for long-running workers (servers do this automatically):

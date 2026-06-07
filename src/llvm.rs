@@ -55,6 +55,11 @@ struct Gen {
     has_mem: bool,
     has_env: bool,
     has_mongo: bool,
+    has_strings: bool,
+    has_fs: bool,
+    has_time: bool,
+    has_math: bool,
+    has_fmt: bool,
     needs: Needs,
 }
 
@@ -73,6 +78,11 @@ struct Needs {
     mem: bool,
     env: bool,
     mongo: bool,
+    strings: bool,
+    fs: bool,
+    time: bool,
+    math: bool,
+    fmt: bool,
 }
 
 enum MatchMode {
@@ -113,6 +123,11 @@ pub fn generate(program: &Program) -> Result<String, String> {
         has_mem: program.imports.iter().any(|i| i.starts_with("std/mem")),
         has_env: program.imports.iter().any(|i| i.starts_with("std/env")),
         has_mongo: program.imports.iter().any(|i| i.starts_with("std/mongo")),
+        has_strings: program.imports.iter().any(|i| i.starts_with("std/strings")),
+        has_fs: program.imports.iter().any(|i| i.starts_with("std/fs")),
+        has_time: program.imports.iter().any(|i| i.starts_with("std/time")),
+        has_math: program.imports.iter().any(|i| i.starts_with("std/math")),
+        has_fmt: program.imports.iter().any(|i| i.starts_with("std/fmt")),
         needs: Needs::default(),
     };
 
@@ -367,6 +382,80 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare void @vader_mongo_close(i8*)\n",
         );
     }
+    if g.needs.strings {
+        result.push_str(
+            "declare i64 @vader_str_length(i8*)\n\
+             declare i8* @vader_str_upper(i8*)\n\
+             declare i8* @vader_str_lower(i8*)\n\
+             declare i8* @vader_str_trim(i8*)\n\
+             declare i32 @vader_str_contains(i8*, i8*)\n\
+             declare i64 @vader_str_index_of(i8*, i8*)\n\
+             declare i32 @vader_str_starts_with(i8*, i8*)\n\
+             declare i32 @vader_str_ends_with(i8*, i8*)\n\
+             declare i8* @vader_str_substring(i8*, i64, i64)\n\
+             declare i8* @vader_str_repeat(i8*, i64)\n\
+             declare i8* @vader_str_replace(i8*, i8*, i8*)\n\
+             declare i64 @vader_str_to_int(i8*)\n\
+             declare double @vader_str_to_float(i8*)\n\
+             declare { i8**, i64 } @vader_str_split(i8*, i8*)\n\
+             declare i8* @vader_str_join({ i8**, i64 }, i8*)\n",
+        );
+    }
+    if g.needs.math {
+        result.push_str(
+            "declare double @vader_math_sqrt(double)\n\
+             declare double @vader_math_pow(double, double)\n\
+             declare double @vader_math_abs(double)\n\
+             declare double @vader_math_floor(double)\n\
+             declare double @vader_math_ceil(double)\n\
+             declare double @vader_math_round(double)\n\
+             declare double @vader_math_sin(double)\n\
+             declare double @vader_math_cos(double)\n\
+             declare double @vader_math_tan(double)\n\
+             declare double @vader_math_log(double)\n\
+             declare double @vader_math_exp(double)\n\
+             declare double @vader_math_fmin(double, double)\n\
+             declare double @vader_math_fmax(double, double)\n\
+             declare double @vader_math_pi()\n\
+             declare i64 @vader_math_abs_int(i64)\n\
+             declare i64 @vader_math_min_int(i64, i64)\n\
+             declare i64 @vader_math_max_int(i64, i64)\n\
+             declare double @vader_math_random()\n\
+             declare i64 @vader_math_random_int(i64)\n",
+        );
+    }
+    if g.needs.time {
+        result.push_str(
+            "declare i64 @vader_time_now()\n\
+             declare i64 @vader_time_now_ms()\n\
+             declare void @vader_time_sleep(i64)\n\
+             declare i8* @vader_time_format(i64)\n\
+             declare i64 @vader_time_year(i64)\n\
+             declare i64 @vader_time_month(i64)\n\
+             declare i64 @vader_time_day(i64)\n\
+             declare i64 @vader_time_hour(i64)\n\
+             declare i64 @vader_time_minute(i64)\n\
+             declare i64 @vader_time_second(i64)\n",
+        );
+    }
+    if g.needs.fs {
+        result.push_str(
+            "declare i8* @vader_fs_read_file(i8*)\n\
+             declare i32 @vader_fs_write_file(i8*, i8*)\n\
+             declare i32 @vader_fs_append_file(i8*, i8*)\n\
+             declare i32 @vader_fs_exists(i8*)\n\
+             declare i32 @vader_fs_remove(i8*)\n\
+             declare i8* @vader_fs_read_line()\n",
+        );
+    }
+    if g.needs.fmt {
+        result.push_str(
+            "declare i8* @vader_fmt_from_int(i64)\n\
+             declare i8* @vader_fmt_from_float(double)\n\
+             declare i8* @vader_fmt_from_bool(i32)\n\
+             declare i8* @vader_fmt_pad_left(i8*, i64, i8*)\n",
+        );
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -457,14 +546,16 @@ impl Gen {
     }
 
     /// Extracts the element type of a slice `{ T*, i64 }` -> `T`.
+    /// Handles pointer elements (`{ i8**, i64 }` -> `i8*`) and nested slices.
     fn slice_elem(bt: &str) -> String {
-        bt.trim_start_matches('{')
-            .trim()
-            .split('*')
-            .next()
-            .unwrap_or("i8")
-            .trim()
-            .to_string()
+        let inner = bt.trim().strip_prefix('{').unwrap_or(bt).trim();
+        if let Some(idx) = inner.rfind("*, i64 }") {
+            return inner[..idx].trim().to_string(); // pointer/struct element
+        }
+        if let Some(idx) = inner.rfind(", i64 }") {
+            return inner[..idx].trim().to_string(); // scalar element
+        }
+        "i8".to_string()
     }
 
     fn ret_type(&self, f: &Function) -> Result<String, String> {
@@ -1581,6 +1672,105 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
+    /// Intrinsics of `std/strings`.
+    fn gen_strings_call(&mut self, name: &str, args: &[Expr]) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "length" => ("vader_str_length", "i64", &["i8*"]),
+            "upper" => ("vader_str_upper", "i8*", &["i8*"]),
+            "lower" => ("vader_str_lower", "i8*", &["i8*"]),
+            "trim" => ("vader_str_trim", "i8*", &["i8*"]),
+            "contains" => ("vader_str_contains", "i1", &["i8*", "i8*"]),
+            "index_of" => ("vader_str_index_of", "i64", &["i8*", "i8*"]),
+            "starts_with" => ("vader_str_starts_with", "i1", &["i8*", "i8*"]),
+            "ends_with" => ("vader_str_ends_with", "i1", &["i8*", "i8*"]),
+            "substring" => ("vader_str_substring", "i8*", &["i8*", "i64", "i64"]),
+            "repeat" => ("vader_str_repeat", "i8*", &["i8*", "i64"]),
+            "replace" => ("vader_str_replace", "i8*", &["i8*", "i8*", "i8*"]),
+            "to_int" => ("vader_str_to_int", "i64", &["i8*"]),
+            "to_float" => ("vader_str_to_float", "double", &["i8*"]),
+            "split" => ("vader_str_split", "{ i8**, i64 }", &["i8*", "i8*"]),
+            "join" => ("vader_str_join", "i8*", &["{ i8**, i64 }", "i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.strings = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrinsics of `std/math`.
+    fn gen_math_call(&mut self, name: &str, args: &[Expr]) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "sqrt" => ("vader_math_sqrt", "double", &["double"]),
+            "pow" => ("vader_math_pow", "double", &["double", "double"]),
+            "abs" => ("vader_math_abs", "double", &["double"]),
+            "floor" => ("vader_math_floor", "double", &["double"]),
+            "ceil" => ("vader_math_ceil", "double", &["double"]),
+            "round" => ("vader_math_round", "double", &["double"]),
+            "sin" => ("vader_math_sin", "double", &["double"]),
+            "cos" => ("vader_math_cos", "double", &["double"]),
+            "tan" => ("vader_math_tan", "double", &["double"]),
+            "log" => ("vader_math_log", "double", &["double"]),
+            "exp" => ("vader_math_exp", "double", &["double"]),
+            "fmin" => ("vader_math_fmin", "double", &["double", "double"]),
+            "fmax" => ("vader_math_fmax", "double", &["double", "double"]),
+            "pi" => ("vader_math_pi", "double", &[]),
+            "abs_int" => ("vader_math_abs_int", "i64", &["i64"]),
+            "min" => ("vader_math_min_int", "i64", &["i64", "i64"]),
+            "max" => ("vader_math_max_int", "i64", &["i64", "i64"]),
+            "random" => ("vader_math_random", "double", &[]),
+            "random_int" => ("vader_math_random_int", "i64", &["i64"]),
+            _ => return Ok(None),
+        };
+        self.needs.math = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrinsics of `std/time`.
+    fn gen_time_call(&mut self, name: &str, args: &[Expr]) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "now" => ("vader_time_now", "i64", &[]),
+            "now_ms" => ("vader_time_now_ms", "i64", &[]),
+            "sleep" => ("vader_time_sleep", "void", &["i64"]),
+            "format" => ("vader_time_format", "i8*", &["i64"]),
+            "year" => ("vader_time_year", "i64", &["i64"]),
+            "month" => ("vader_time_month", "i64", &["i64"]),
+            "day" => ("vader_time_day", "i64", &["i64"]),
+            "hour" => ("vader_time_hour", "i64", &["i64"]),
+            "minute" => ("vader_time_minute", "i64", &["i64"]),
+            "second" => ("vader_time_second", "i64", &["i64"]),
+            _ => return Ok(None),
+        };
+        self.needs.time = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrinsics of `std/fs`.
+    fn gen_fs_call(&mut self, name: &str, args: &[Expr]) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "read_file" => ("vader_fs_read_file", "i8*", &["i8*"]),
+            "write_file" => ("vader_fs_write_file", "i1", &["i8*", "i8*"]),
+            "append_file" => ("vader_fs_append_file", "i1", &["i8*", "i8*"]),
+            "exists" => ("vader_fs_exists", "i1", &["i8*"]),
+            "remove" => ("vader_fs_remove", "i1", &["i8*"]),
+            "read_line" => ("vader_fs_read_line", "i8*", &[]),
+            _ => return Ok(None),
+        };
+        self.needs.fs = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
+    /// Intrinsics of `std/fmt`.
+    fn gen_fmt_call(&mut self, name: &str, args: &[Expr]) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "from_int" => ("vader_fmt_from_int", "i8*", &["i64"]),
+            "from_float" => ("vader_fmt_from_float", "i8*", &["double"]),
+            "from_bool" => ("vader_fmt_from_bool", "i8*", &["i32"]),
+            "pad_left" => ("vader_fmt_pad_left", "i8*", &["i8*", "i64", "i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.fmt = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
     /// Emits a call to an external function (C runtime). Coerces args (i64->i32,
     /// i1->i32) and converts the return value (i1<-i32 via icmp; void; otherwise direct).
     fn emit_extern(
@@ -1601,6 +1791,10 @@ impl Gen {
             } else if t == "i1" && pty == "i32" {
                 let r = self.fresh();
                 self.emit(&format!("{} = zext i1 {} to i32", r, v));
+                r
+            } else if t == "i64" && pty == "double" {
+                let r = self.fresh();
+                self.emit(&format!("{} = sitofp i64 {} to double", r, v));
                 r
             } else {
                 v
@@ -1755,6 +1949,31 @@ impl Gen {
         }
         if self.has_mongo {
             if let Some(r) = self.gen_mongo_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_strings {
+            if let Some(r) = self.gen_strings_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_fs {
+            if let Some(r) = self.gen_fs_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_time {
+            if let Some(r) = self.gen_time_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_math {
+            if let Some(r) = self.gen_math_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_fmt {
+            if let Some(r) = self.gen_fmt_call(&name, args)? {
                 return Ok(r);
             }
         }
@@ -2352,6 +2571,34 @@ mod tests {
         assert!(out.contains("bitcast void (i8*)* @h to i8*")); // function as a value
         assert!(out.contains("@vader_router_add"));
         assert!(out.contains("call void @vader_router_serve"));
+    }
+
+    #[test]
+    fn emits_stdlib_calls_and_string_slice() {
+        use crate::module;
+        use std::collections::HashSet;
+        let src = "import \"std/strings\"\n\
+                   import \"std/math\"\n\
+                   public fn main() {\n\
+                   []string p = strings.split(\"a,b\", \",\")\n\
+                   string j = strings.join(p, \"-\")\n\
+                   string u = strings.upper(p[0])\n\
+                   double r = math.sqrt(4.0)\n\
+                   }";
+        let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
+        let pkgs: HashSet<String> = ["strings".to_string(), "math".to_string()].into_iter().collect();
+        module::normalize(&mut prog, &pkgs);
+        let out = generate(&prog).unwrap();
+        assert!(out.contains("@vader_str_split"));
+        assert!(out.contains("@vader_str_join"));
+        assert!(out.contains("@vader_math_sqrt"));
+    }
+
+    #[test]
+    fn slice_elem_handles_pointer_and_scalar() {
+        assert_eq!(Gen::slice_elem("{ i8**, i64 }"), "i8*");
+        assert_eq!(Gen::slice_elem("{ i64, i64 }"), "i64");
+        assert_eq!(Gen::slice_elem("{ double, i64 }"), "double");
     }
 
     #[test]

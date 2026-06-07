@@ -29,6 +29,12 @@ const VADER_ROUTER_C: &str = include_str!("../runtime/vader_router.c");
 const VADER_MONGO_C: &str = include_str!("../runtime/vader_mongo.c");
 /// Shared SCRAM-SHA-256 crypto (used by the Mongo driver for auth).
 const VADER_SCRAM_C: &str = include_str!("../runtime/vader_scram.c");
+/// General-purpose stdlib: strings, math, time, fs, fmt.
+const VADER_STR_C: &str = include_str!("../runtime/vader_str.c");
+const VADER_MATH_C: &str = include_str!("../runtime/vader_math.c");
+const VADER_TIME_C: &str = include_str!("../runtime/vader_time.c");
+const VADER_FS_C: &str = include_str!("../runtime/vader_fs.c");
+const VADER_FMT_C: &str = include_str!("../runtime/vader_fmt.c");
 /// Arena/region allocator (long-lived service memory): bump-alloc per scope.
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 /// std/os and std/env: access to the process environment.
@@ -648,6 +654,22 @@ fn build_run_program(
     if ir.contains("@vader_mongo_") {
         cmd.arg(cached_obj(&dir, "vader_mongo", VADER_MONGO_C, &[], quiet)?);
         cmd.arg(cached_obj(&dir, "vader_scram", VADER_SCRAM_C, &[], quiet)?);
+    }
+    if ir.contains("@vader_str_") {
+        cmd.arg(cached_obj(&dir, "vader_str", VADER_STR_C, &[], quiet)?);
+    }
+    if ir.contains("@vader_math_") {
+        cmd.arg(cached_obj(&dir, "vader_math", VADER_MATH_C, &[], quiet)?);
+        cmd.arg("-lm");
+    }
+    if ir.contains("@vader_time_") {
+        cmd.arg(cached_obj(&dir, "vader_time", VADER_TIME_C, &[], quiet)?);
+    }
+    if ir.contains("@vader_fs_") {
+        cmd.arg(cached_obj(&dir, "vader_fs", VADER_FS_C, &[], quiet)?);
+    }
+    if ir.contains("@vader_fmt_") {
+        cmd.arg(cached_obj(&dir, "vader_fmt", VADER_FMT_C, &[], quiet)?);
     }
     cmd.arg("-o").arg(&bin);
     match cmd.status() {

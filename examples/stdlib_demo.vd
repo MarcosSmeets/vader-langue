@@ -1,0 +1,45 @@
+// General-purpose stdlib: strings, math, time, fs, fmt.
+import "std/strings"
+import "std/math"
+import "std/time"
+import "std/fs"
+import "std/fmt"
+
+public fn main() {
+    // --- strings ---
+    print("trim:", strings.trim("  Hello Vader  "))
+    print("upper:", strings.upper("vader"))
+    print("contains:", fmt.from_bool(strings.contains("hello", "ell")))
+    print("replace:", strings.replace("a-b-c", "-", "+"))
+    print("substring:", strings.substring("abcdef", 1, 4))
+    print("index_of:", strings.index_of("hello", "l"))
+    print("to_int+8:", strings.to_int("42") + 8)
+    []string parts = strings.split("a,b,c,d", ",")
+    print("split len:", len(parts))
+    print("part[1]:", parts[1])
+    print("join:", strings.join(parts, "|"))
+
+    // --- math ---
+    print("sqrt:", math.sqrt(144.0))
+    print("pow:", math.pow(2.0, 10.0))
+    print("max:", math.max(3, 7))
+    print("abs_int:", math.abs_int(-5))
+    print("floor:", math.floor(3.7))
+
+    // --- fmt ---
+    print("from_int:", "n=" + fmt.from_int(123))
+    print("from_float:", fmt.from_float(3.14))
+    print("pad_left:", fmt.pad_left("7", 4, "0"))
+
+    // --- time ---
+    int t = time.now()
+    print("year>=2025:", fmt.from_bool(time.year(t) >= 2025))
+
+    // --- fs ---
+    fs.write_file("/tmp/vader_fs_demo.txt", "line one\nline two")
+    print("exists:", fmt.from_bool(fs.exists("/tmp/vader_fs_demo.txt")))
+    string content = fs.read_file("/tmp/vader_fs_demo.txt")
+    print("read length:", strings.length(content))
+    fs.remove("/tmp/vader_fs_demo.txt")
+    print("exists after remove:", fmt.from_bool(fs.exists("/tmp/vader_fs_demo.txt")))
+}
