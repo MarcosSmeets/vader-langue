@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0
+
+- **Run / Build / Test from the editor** — CodeLens **▶ Run · Build · LLVM** above
+  `fn main()` and **▶ Run tests** above `test "…"` blocks; *Vader: Run/Build/Test File*
+  and *Test Project* commands in the Command Palette, right-click menu, and the editor
+  title ▶ menu.
+- **Formatting** — document formatter backed by `vader fmt` (`Shift+Alt+F` and
+  format-on-save); files with a syntax error are left untouched.
+- **Hover & signature help** — stdlib calls (`db.`/`http.`/`json.`/`mem.` and
+  `newRouter`/`serve`) show their signature on hover and parameter hints while typing,
+  plus an *Add import "std/…"* quick-fix.
+- **Test Explorer** — `test "…"` blocks appear in the VS Code Testing panel and run
+  via `vader test`, with per-test pass/fail.
+- Marketplace: added Snippets/Formatters/Linters categories and a gallery banner.
+
 ## 0.5.0
 
 - **English UI** — every user-facing string (description, settings, command

@@ -1,20 +1,57 @@
-// Vader extension client:
-//  (1) connects the editor to the `vader lsp` language server;
-//  (2) code-generation commands (struct/usecase/handler/fn) in the right-click menu.
-// Plain JavaScript (no TS build). Needs `npm install` once (only for the LSP).
+// Vader extension client (plain JavaScript, no TS build):
+//  (1) language server (`vader lsp`) for real-time diagnostics;
+//  (2) code generation (struct/usecase/handler/fn) in the right-click menu;
+//  (3) stdlib completion with automatic imports;
+//  (4) run/build/test CodeLens + commands;
+//  (5) formatting via `vader fmt`;
+//  (6) hover, signature help, and an "add import" quick-fix;
+//  (7) native Test Explorer for `test "..."` blocks.
+// `npm install` is needed once (only for the LSP client dependency).
 
 const {
-  workspace, window, commands, languages,
-  CompletionItem, CompletionItemKind, SnippetString, TextEdit, Position,
+  workspace, window, commands, languages, tests,
+  CompletionItem, CompletionItemKind, SnippetString, TextEdit, WorkspaceEdit,
+  Position, Range,
+  Hover, MarkdownString, SignatureHelp, SignatureInformation, ParameterInformation,
+  CodeAction, CodeActionKind, CodeLens, TestRunProfileKind, TestMessage,
 } = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
+const cp = require("child_process");
+const os = require("os");
+const path = require("path");
+const fs = require("fs");
 
 let client;
 
 function activate(context) {
   registerGenCommands(context);
   registerStdCompletion(context);
+  registerRunCommands(context);
+  registerFormatter(context);
+  registerHoverAndSignature(context);
+  registerImportQuickFix(context);
+  registerTestController(context);
   startLanguageServer();
+}
+
+// --- shared helpers ----------------------------------------------------------
+
+// The `vader` binary (also used as the LSP server). Configurable via vader.serverPath.
+function binPath() {
+  return workspace.getConfiguration("vader").get("serverPath", "vader");
+}
+
+function shellQuote(p) {
+  return /\s/.test(p) ? `"${p}"` : p;
+}
+
+// Run a command line in the shared "Vader" integrated terminal (user's PATH/WSL env).
+function runInTerminal(cmdline) {
+  const term =
+    window.terminals.find((t) => t.name === "Vader") ||
+    window.createTerminal("Vader");
+  term.show();
+  term.sendText(cmdline);
 }
 
 // --- (1) Language Server -----------------------------------------------------
@@ -222,6 +259,270 @@ function importEdit(document, path) {
   const next = at < lines.length ? lines[at] : "";
   const spacer = next.trim() !== "" && !/^\s*import\b/.test(next) ? "\n" : "";
   return TextEdit.insert(new Position(at, 0), `import "${path}"\n${spacer}`);
+}
+
+// --- (4) Run / build / test commands + CodeLens ------------------------------
+
+function registerRunCommands(context) {
+  const onActiveFile = (sub) => () => {
+    const ed = window.activeTextEditor;
+    if (!ed || ed.document.languageId !== "vader") {
+      window.showWarningMessage("Vader: open a .vd file first.");
+      return;
+    }
+    if (ed.document.isDirty) ed.document.save();
+    runInTerminal(`${shellQuote(binPath())} ${sub} ${shellQuote(ed.document.fileName)}`);
+  };
+
+  context.subscriptions.push(
+    commands.registerCommand("vader.runFile", onActiveFile("run")),
+    commands.registerCommand("vader.buildFile", onActiveFile("build")),
+    commands.registerCommand("vader.llvmFile", onActiveFile("llvm")),
+    commands.registerCommand("vader.testFile", onActiveFile("test")),
+    commands.registerCommand("vader.testProject", () => {
+      const folder = workspace.workspaceFolders && workspace.workspaceFolders[0];
+      const target = folder ? folder.uri.fsPath : ".";
+      runInTerminal(`${shellQuote(binPath())} test ${shellQuote(target)}`);
+    })
+  );
+
+  const codeLensProvider = {
+    provideCodeLenses(document) {
+      const lenses = [];
+      const lines = document.getText().split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const range = new Range(i, 0, i, 0);
+        if (/^\s*(public\s+)?fn\s+main\s*\(\s*\)/.test(lines[i])) {
+          lenses.push(new CodeLens(range, { title: "▶ Run", command: "vader.runFile" }));
+          lenses.push(new CodeLens(range, { title: "Build", command: "vader.buildFile" }));
+          lenses.push(new CodeLens(range, { title: "LLVM", command: "vader.llvmFile" }));
+        } else if (/^\s*test\s+"(?:[^"\\]|\\.)*"\s*\{/.test(lines[i])) {
+          lenses.push(new CodeLens(range, { title: "▶ Run tests", command: "vader.testFile" }));
+        }
+      }
+      return lenses;
+    },
+  };
+  context.subscriptions.push(
+    languages.registerCodeLensProvider("vader", codeLensProvider)
+  );
+}
+
+// --- (5) Formatting via `vader fmt` ------------------------------------------
+
+function registerFormatter(context) {
+  const provider = {
+    provideDocumentFormattingEdits(document) {
+      return new Promise((resolve) => {
+        const tmp = path.join(os.tmpdir(), `vader-fmt-${process.pid}-${Date.now()}.vd`);
+        try {
+          fs.writeFileSync(tmp, document.getText());
+        } catch (_e) {
+          resolve([]);
+          return;
+        }
+        cp.execFile(binPath(), ["fmt", tmp], { timeout: 10000 }, (err, stdout) => {
+          fs.unlink(tmp, () => {});
+          // On a syntax error (non-zero exit) or an unrunnable binary, leave the file untouched.
+          if (err || !stdout) {
+            resolve([]);
+            return;
+          }
+          const full = new Range(
+            document.positionAt(0),
+            document.positionAt(document.getText().length)
+          );
+          resolve([TextEdit.replace(full, stdout)]);
+        });
+      });
+    },
+  };
+  context.subscriptions.push(
+    languages.registerDocumentFormattingEditProvider("vader", provider)
+  );
+}
+
+// --- (6) Hover + signature help (reuses STD_MODULES / STD_GLOBALS) -----------
+
+function registerHoverAndSignature(context) {
+  const hover = {
+    provideHover(document, position) {
+      const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+      if (!wordRange) return null;
+      const word = document.getText(wordRange);
+      const before = document.getText(
+        new Range(wordRange.start.line, 0, wordRange.start.line, wordRange.start.character)
+      );
+      const m = before.match(/([A-Za-z]+)\.\s*$/);
+      if (m && STD_MODULES[m[1]]) {
+        const it = STD_MODULES[m[1]].items.find((x) => x.name === word);
+        if (it) return stdHover(`${m[1]}.${it.sig}`, STD_MODULES[m[1]].path, wordRange);
+      }
+      const g = STD_GLOBALS.find((x) => x.name === word);
+      if (g) return stdHover(g.sig, g.path, wordRange);
+      return null;
+    },
+  };
+
+  const signature = {
+    provideSignatureHelp(document, position) {
+      const prefix = document.getText(new Range(position.line, 0, position.line, position.character));
+      let it = null, label = null, argsSoFar = null;
+      const mm = prefix.match(/([A-Za-z]+)\.([A-Za-z0-9_]+)\(([^()]*)$/);
+      if (mm && STD_MODULES[mm[1]]) {
+        it = STD_MODULES[mm[1]].items.find((x) => x.name === mm[2]);
+        if (it) { label = `${mm[1]}.${it.sig}`; argsSoFar = mm[3]; }
+      }
+      if (!it) {
+        const gm = prefix.match(/\b(newRouter|serve)\(([^()]*)$/);
+        if (gm) { it = STD_GLOBALS.find((x) => x.name === gm[1]); if (it) { label = it.sig; argsSoFar = gm[2]; } }
+      }
+      if (!it) return null;
+      const info = new SignatureInformation(label);
+      info.parameters = (it.args || []).map((a) => new ParameterInformation(a));
+      const help = new SignatureHelp();
+      help.signatures = [info];
+      help.activeSignature = 0;
+      help.activeParameter = it.args && it.args.length
+        ? Math.min((argsSoFar.match(/,/g) || []).length, it.args.length - 1)
+        : 0;
+      return help;
+    },
+  };
+
+  context.subscriptions.push(
+    languages.registerHoverProvider("vader", hover),
+    languages.registerSignatureHelpProvider("vader", signature, "(", ",")
+  );
+}
+
+function stdHover(sig, modPath, range) {
+  const md = new MarkdownString();
+  md.appendCodeblock(sig, "vader");
+  md.appendMarkdown(`Vader stdlib — \`import "${modPath}"\``);
+  return new Hover(md, range);
+}
+
+// --- (7) "Add import" quick-fix (reuses importEdit) --------------------------
+
+function registerImportQuickFix(context) {
+  const provider = {
+    provideCodeActions(document, range) {
+      const line = document.lineAt(range.start.line).text;
+      const actions = [];
+      const seen = new Set();
+      let m;
+      const re = /\b(db|http|json|mem)\./g;
+      while ((m = re.exec(line))) {
+        const mod = STD_MODULES[m[1]];
+        if (mod && !seen.has(mod.path)) {
+          seen.add(mod.path);
+          const a = addImportAction(document, mod.path);
+          if (a) actions.push(a);
+        }
+      }
+      if (/\b(newRouter|serve)\b/.test(line) && !seen.has("std/http")) {
+        const a = addImportAction(document, "std/http");
+        if (a) actions.push(a);
+      }
+      return actions;
+    },
+  };
+  context.subscriptions.push(
+    languages.registerCodeActionsProvider("vader", provider, {
+      providedCodeActionKinds: [CodeActionKind.QuickFix],
+    })
+  );
+}
+
+function addImportAction(document, modPath) {
+  const edit = importEdit(document, modPath); // undefined if already imported
+  if (!edit) return null;
+  const action = new CodeAction(`Add import "${modPath}"`, CodeActionKind.QuickFix);
+  action.edit = new WorkspaceEdit();
+  action.edit.insert(document.uri, edit.range.start, edit.newText);
+  return action;
+}
+
+// --- (8) Test Explorer for `test "..."` blocks -------------------------------
+
+function registerTestController(context) {
+  const ctrl = tests.createTestController("vader", "Vader");
+  context.subscriptions.push(ctrl);
+
+  const parseDoc = (document) => {
+    if (document.languageId !== "vader" && !document.uri.fsPath.endsWith(".vd")) return;
+    const uri = document.uri;
+    const lines = document.getText().split(/\r?\n/);
+    const children = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*test\s+"((?:[^"\\]|\\.)*)"\s*\{/);
+      if (m) {
+        const name = m[1].replace(/\\(.)/g, "$1");
+        const item = ctrl.createTestItem(`${uri.toString()}::${name}`, name, uri);
+        item.range = new Range(i, 0, i, lines[i].length);
+        children.push(item);
+      }
+    }
+    if (children.length === 0) {
+      ctrl.items.delete(uri.toString());
+      return;
+    }
+    const fileItem =
+      ctrl.items.get(uri.toString()) ||
+      ctrl.createTestItem(uri.toString(), workspace.asRelativePath(uri), uri);
+    ctrl.items.add(fileItem);
+    fileItem.children.replace(children);
+  };
+
+  workspace.textDocuments.forEach(parseDoc);
+  workspace.findFiles("**/*.vd", "**/node_modules/**", 2000).then((uris) => {
+    uris.forEach((u) => workspace.openTextDocument(u).then(parseDoc, () => {}));
+  });
+  context.subscriptions.push(
+    workspace.onDidOpenTextDocument(parseDoc),
+    workspace.onDidChangeTextDocument((e) => parseDoc(e.document)),
+    workspace.onDidSaveTextDocument(parseDoc)
+  );
+
+  const runHandler = (request) => {
+    const run = ctrl.createTestRun(request);
+    const fileItems = [];
+    const collect = (it) => {
+      const f = it.parent || it;
+      if (!fileItems.includes(f)) fileItems.push(f);
+    };
+    if (request.include) request.include.forEach(collect);
+    else ctrl.items.forEach((f) => fileItems.push(f));
+
+    const runFile = (fileItem) =>
+      new Promise((resolve) => {
+        fileItem.children.forEach((c) => run.started(c));
+        cp.execFile(binPath(), ["test", fileItem.uri.fsPath], { timeout: 60000 }, (err, stdout, stderr) => {
+          const out = (stdout || "") + (stderr || "");
+          const results = {};
+          out.split(/\r?\n/).forEach((ln) => {
+            let mm = ln.match(/^\s*✓\s+(.+?)\s*$/);
+            if (mm) { results[mm[1]] = true; return; }
+            mm = ln.match(/^\s*✗\s+(.+?)\s*$/);
+            if (mm) results[mm[1]] = false;
+          });
+          fileItem.children.forEach((c) => {
+            if (results[c.label] === true) run.passed(c);
+            else if (results[c.label] === false) run.failed(c, new TestMessage("Test failed"));
+            else run.skipped(c);
+          });
+          if (Object.keys(results).length === 0 && out.trim()) {
+            run.appendOutput(out.replace(/\r?\n/g, "\r\n"));
+          }
+          resolve();
+        });
+      });
+
+    Promise.all(fileItems.map(runFile)).then(() => run.end());
+  };
+
+  ctrl.createRunProfile("Run", TestRunProfileKind.Run, runHandler, true);
 }
 
 function deactivate() {

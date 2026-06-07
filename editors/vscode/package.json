@@ -1,23 +1,35 @@
 {
   "name": "vader",
   "displayName": "Vader Language",
-  "description": "Syntax highlighting, Language Server, and code generation (scaffolding) for the Vader language.",
-  "version": "0.5.0",
+  "description": "Vader language support: syntax highlighting, language server, snippets, completion with auto-import, formatting, run/test, and code generation.",
+  "version": "0.6.0",
   "publisher": "Vader",
   "license": "MIT",
   "icon": "icons/icon.png",
+  "galleryBanner": {
+    "color": "#14161b",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Snippets",
+    "Formatters",
+    "Linters"
   ],
   "keywords": [
     "vader",
+    "vd",
     "language",
     "compiler",
     "lsp",
-    "syntax-highlighting"
+    "syntax-highlighting",
+    "snippets",
+    "formatter",
+    "router",
+    "clean-architecture"
   ],
   "repository": {
     "type": "git",
@@ -96,6 +108,31 @@
         "command": "vader.gen.fn",
         "title": "Generate Function",
         "category": "Vader"
+      },
+      {
+        "command": "vader.runFile",
+        "title": "Run File",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.buildFile",
+        "title": "Build File (native)",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.llvmFile",
+        "title": "Build & Run (LLVM)",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.testFile",
+        "title": "Test File",
+        "category": "Vader"
+      },
+      {
+        "command": "vader.testProject",
+        "title": "Test Project",
+        "category": "Vader"
       }
     ],
     "submenus": [
@@ -111,10 +148,32 @@
           "group": "2_workspace"
         }
       ],
+      "editor/title/run": [
+        {
+          "command": "vader.runFile",
+          "when": "editorLangId == vader",
+          "group": "vader@1"
+        },
+        {
+          "command": "vader.testFile",
+          "when": "editorLangId == vader",
+          "group": "vader@2"
+        }
+      ],
       "editor/context": [
         {
+          "command": "vader.runFile",
+          "when": "editorLangId == vader",
+          "group": "1_run@1"
+        },
+        {
+          "command": "vader.testFile",
+          "when": "editorLangId == vader",
+          "group": "1_run@2"
+        },
+        {
           "submenu": "vader.genMenu",
-          "group": "1_modification",
+          "group": "2_workspace",
           "when": "editorLangId == vader"
         }
       ],

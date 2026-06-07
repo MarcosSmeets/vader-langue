@@ -11,6 +11,20 @@ What it gives you:
 4. **Stdlib completion with auto-import** — type `db.`, `http.`, `json.` or
    `mem.` to complete the built-in functions; accepting one inserts the matching
    `import "std/…"` automatically if it's missing.
+5. **Run / Build / Test** — CodeLens **▶ Run · Build · LLVM** above `fn main()` and
+   **▶ Run tests** above `test "…"` blocks, plus *Vader: Run/Build/Test File* commands
+   (Command Palette, right-click, and the editor title ▶ menu). Runs in a terminal.
+6. **Formatting** — `Shift+Alt+F` (or format-on-save) runs `vader fmt`; a file with a
+   syntax error is left untouched.
+7. **Hover & signature help** — hover a stdlib call (e.g. `db.exec`) for its signature,
+   and get parameter hints while typing. Plus an *Add import "std/…"* quick-fix. These
+   work without the `vader` binary.
+8. **Test Explorer** — `test "…"` blocks show up in the Testing panel and run via
+   `vader test`, with per-test pass/fail.
+
+> Items 1–2 and 5–6 use the `vader` binary (a Linux/WSL build) — they work where
+> `vader` is runnable (Remote-WSL or a native build); set `vader.serverPath` if it's
+> not on your `PATH`. Snippets, completion, hover, and quick-fixes need no binary.
 
 ## 1) Syntax highlighting (no setup)
 
