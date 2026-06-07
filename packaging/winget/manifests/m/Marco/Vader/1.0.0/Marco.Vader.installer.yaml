@@ -1,0 +1,11 @@
+PackageIdentifier: Marco.Vader
+PackageVersion: 1.0.0
+InstallerType: portable
+Commands:
+  - vader
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/MarcosSmeets/vader-langue/releases/download/v1.0.0/vader-windows-x86_64.exe
+    InstallerSha256: 19C53E0B35BCEC81F3C30DFEFA41FB7A67BC94DD660649BC9EB961784A3B389A
+ManifestType: installer
+ManifestVersion: 1.6.0
