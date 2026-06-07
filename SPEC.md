@@ -159,9 +159,10 @@ to LLVM touches only the last box.
 - [x] **Mongo driver** (`std/mongo`) — a document API (not SQL): `mongo.connect(dsn)`,
       `mongo.insert(m, coll, doc)`, `mongo.find(m, coll, query): docs`, `mongo.close(m)`.
       Own BSON encoder/decoder (reusing the `vader_json` value tree) + the OP_MSG wire protocol
-      (`runtime/vader_mongo.c`). No auth (local/dev). **Live-verified** against MongoDB 7 (Docker):
-      insert two documents, find them back. Pending: SCRAM-SHA-1 auth (the SHA-1 from the MySQL
-      driver is reusable) and update/delete.
+      (`runtime/vader_mongo.c`) + **SCRAM-SHA-256 authentication** (shared crypto in
+      `runtime/vader_scram.c`). **Live-verified** against MongoDB 7 (Docker): with credentials
+      (`mongodb://user:pass@host/db`) insert + find succeed, and without credentials inserts are
+      rejected. Pending: update/delete and the aggregation pipeline.
 - [x] **Real execution of migrations** — `vader migrate up/down [--db <dsn>]` (or `[database] url`
       in vader.toml) runs the SQL against the database via `std/db` (`db.must` aborts on failure; only marks
       applied on success). **Verified against SQLite** (up creates+seeds, down reverts).

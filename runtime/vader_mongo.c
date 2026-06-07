@@ -34,6 +34,14 @@ extern void *vader_json_add_bool(void *, int);
 extern void *vader_json_field(void *, const char *);
 extern char *vader_strdup(const char *);
 
+/* SCRAM-SHA-256 crypto (vader_scram.c) */
+extern void vader_scram_sha256(const unsigned char *, int, unsigned char[32]);
+extern void vader_scram_hmac(const unsigned char *, int, const unsigned char *, int, unsigned char[32]);
+extern void vader_scram_pbkdf2(const char *, int, const unsigned char *, int, int, unsigned char[32]);
+extern char *vader_scram_b64encode(const unsigned char *, int);
+extern int vader_scram_b64decode(const char *, int, unsigned char *);
+extern void vader_scram_nonce(char *, int);
+
 enum { JT_NULL, JT_BOOL, JT_INT, JT_DBL, JT_STR, JT_ARR, JT_OBJ };
 
 /* ---- growable byte buffer (malloc; freed after the request) ---- */
@@ -141,12 +149,12 @@ static int read_n(int fd, unsigned char *p, int n) {
 
 typedef struct { int fd; char db[128]; } Mongo;
 
-/* sends `cmd` as an OP_MSG command, returns the decoded reply document or 0. */
-static void *op_msg(Mongo *m, void *cmd) {
+/* sends a raw BSON command doc as OP_MSG; returns the reply BSON document (malloc) + len. */
+static unsigned char *op_msg_raw(Mongo *m, const unsigned char *cmd, int cmdlen, int *outlen) {
     BB body = {0, 0, 0};
     bb_i32(&body, 0);  /* flagBits */
     bb_u8(&body, 0);   /* section kind 0 */
-    bson_doc(&body, cmd);
+    bb_raw(&body, cmd, cmdlen);
     BB msg = {0, 0, 0};
     bb_i32(&msg, 16 + body.len);
     bb_i32(&msg, 1);     /* requestID */
@@ -163,18 +171,177 @@ static void *op_msg(Mongo *m, void *cmd) {
     if (blen <= 5) return 0;
     unsigned char *rb = malloc(blen);
     if (read_n(m->fd, rb, blen) < 0) { free(rb); return 0; }
-    void *reply = bson_decode(rb + 5, 0);  /* skip flagBits(4) + section kind(1) */
+    int doclen = blen - 5;  /* skip flagBits(4) + section kind(1) */
+    unsigned char *doc = malloc(doclen);
+    memcpy(doc, rb + 5, doclen);
     free(rb);
+    if (outlen) *outlen = doclen;
+    return doc;
+}
+
+/* sends a json command, returns the decoded reply document or 0. */
+static void *op_msg(Mongo *m, void *cmd) {
+    BB b = {0, 0, 0};
+    bson_doc(&b, cmd);
+    int rlen;
+    unsigned char *doc = op_msg_raw(m, b.buf, b.len, &rlen);
+    free(b.buf);
+    if (!doc) return 0;
+    void *reply = bson_decode(doc, 0);
+    free(doc);
     return reply;
+}
+
+/* ---- raw BSON field scan (for binary auth payloads the json tree can't hold) ---- */
+static int bson_value_size(unsigned char type, const unsigned char *p) {
+    switch (type) {
+    case 0x01: return 8;             /* double */
+    case 0x02: return 4 + rd_i32(p); /* string */
+    case 0x03: case 0x04: return rd_i32(p);  /* doc/array */
+    case 0x05: return 5 + rd_i32(p); /* binary */
+    case 0x07: return 12;            /* objectid */
+    case 0x08: return 1;             /* bool */
+    case 0x09: return 8;             /* datetime */
+    case 0x10: return 4;             /* int32 */
+    case 0x11: return 8;             /* timestamp */
+    case 0x12: return 8;             /* int64 */
+    case 0x0A: return 0;             /* null */
+    default: return -1;
+    }
+}
+
+static const unsigned char *bson_scan(const unsigned char *doc, const char *key, unsigned char *type_out) {
+    int len = rd_i32(doc);
+    const unsigned char *q = doc + 4;
+    const unsigned char *end = doc + len;
+    while (q < end - 1 && *q) {
+        unsigned char type = *q++;
+        const char *k = (const char *)q;
+        q += strlen(k) + 1;
+        int sz = bson_value_size(type, q);
+        if (sz < 0) return 0;
+        if (strcmp(k, key) == 0) { if (type_out) *type_out = type; return q; }
+        q += sz;
+    }
+    return 0;
+}
+
+/* builds a saslStart/saslContinue BSON command into `out` (a binary `payload`). */
+static int build_sasl(BB *out, const char *cmdname, int convid, const char *payload, int plen, const char *db) {
+    int start = out->len;
+    bb_i32(out, 0);
+    bb_u8(out, 0x10); bb_cstr(out, cmdname); bb_i32(out, 1);
+    if (convid >= 0) { bb_u8(out, 0x10); bb_cstr(out, "conversationId"); bb_i32(out, convid); }
+    else { bb_u8(out, 0x02); bb_cstr(out, "mechanism");
+           const char *mech = "SCRAM-SHA-256"; int l = (int)strlen(mech) + 1; bb_i32(out, l); bb_raw(out, mech, l); }
+    bb_u8(out, 0x05); bb_cstr(out, "payload"); bb_i32(out, plen); bb_u8(out, 0x00); bb_raw(out, payload, plen);
+    bb_u8(out, 0x02); bb_cstr(out, "$db"); int dl = (int)strlen(db) + 1; bb_i32(out, dl); bb_raw(out, db, dl);
+    bb_u8(out, 0);
+    int len = out->len - start;
+    memcpy(out->buf + start, &len, 4);
+    return start;
+}
+
+/* SCRAM-SHA-256 authentication over saslStart/saslContinue. Returns 0 on success. */
+static int mongo_auth(Mongo *m, const char *user, const char *pass) {
+    const char *authdb = "admin";  /* SCRAM credentials live in admin by default */
+    char cnonce[33];
+    vader_scram_nonce(cnonce, 24);
+    char first_bare[220];
+    snprintf(first_bare, sizeof first_bare, "n=%s,r=%s", user, cnonce);
+    char gs2[280];
+    snprintf(gs2, sizeof gs2, "n,,%s", first_bare);
+
+    BB c1 = {0, 0, 0};
+    build_sasl(&c1, "saslStart", -1, gs2, (int)strlen(gs2), authdb);
+    int rlen;
+    unsigned char *r1 = op_msg_raw(m, c1.buf, c1.len, &rlen);
+    free(c1.buf);
+    if (!r1) return -1;
+
+    unsigned char t;
+    const unsigned char *cidp = bson_scan(r1, "conversationId", &t);
+    int convid = cidp ? rd_i32(cidp) : 1;
+    const unsigned char *plp = bson_scan(r1, "payload", &t);
+    if (!plp) { free(r1); return -1; }
+    int sflen = rd_i32(plp);
+    char server_first[420];
+    if (sflen > 419) sflen = 419;
+    memcpy(server_first, plp + 5, sflen);
+    server_first[sflen] = 0;
+    free(r1);
+
+    char rnonce[220] = {0}, salt_b64[220] = {0};
+    int iter = 4096;
+    char *rr = strstr(server_first, "r="), *ss = strstr(server_first, "s="), *ii = strstr(server_first, "i=");
+    if (!rr || !ss || !ii) return -1;
+    sscanf(rr + 2, "%219[^,]", rnonce);
+    sscanf(ss + 2, "%219[^,]", salt_b64);
+    iter = atoi(ii + 2);
+    unsigned char salt[200];
+    int saltlen = vader_scram_b64decode(salt_b64, (int)strlen(salt_b64), salt);
+
+    unsigned char salted[32], ckey[32], skey[32], csig[32], proof[32];
+    vader_scram_pbkdf2(pass, (int)strlen(pass), salt, saltlen, iter, salted);
+    vader_scram_hmac(salted, 32, (const unsigned char *)"Client Key", 10, ckey);
+    vader_scram_sha256(ckey, 32, skey);
+    char final_noproof[280];
+    snprintf(final_noproof, sizeof final_noproof, "c=biws,r=%s", rnonce);
+    char authmsg[900];
+    snprintf(authmsg, sizeof authmsg, "%s,%s,%s", first_bare, server_first, final_noproof);
+    vader_scram_hmac(skey, 32, (const unsigned char *)authmsg, (int)strlen(authmsg), csig);
+    for (int i = 0; i < 32; i++) proof[i] = ckey[i] ^ csig[i];
+    char *pb = vader_scram_b64encode(proof, 32);
+    char client_final[420];
+    snprintf(client_final, sizeof client_final, "%s,p=%s", final_noproof, pb);
+    free(pb);
+
+    BB c2 = {0, 0, 0};
+    build_sasl(&c2, "saslContinue", convid, client_final, (int)strlen(client_final), authdb);
+    unsigned char *r2 = op_msg_raw(m, c2.buf, c2.len, &rlen);
+    free(c2.buf);
+    if (!r2) return -1;
+    const unsigned char *okp = bson_scan(r2, "ok", &t);
+    double ok = 0;
+    if (okp) { if (t == 0x01) memcpy(&ok, okp, 8); else if (t == 0x10) ok = rd_i32(okp); }
+    const unsigned char *donep = bson_scan(r2, "done", &t);
+    int done = donep ? *donep : 0;
+    free(r2);
+    if (ok < 0.5) return -1;
+    if (done) return 0;
+    /* server sent the server-final but the conversation isn't done: finish with an
+     * empty saslContinue (the client confirms it verified the server signature). */
+    BB c3 = {0, 0, 0};
+    build_sasl(&c3, "saslContinue", convid, "", 0, authdb);
+    unsigned char *r3 = op_msg_raw(m, c3.buf, c3.len, &rlen);
+    free(c3.buf);
+    if (!r3) return -1;
+    okp = bson_scan(r3, "ok", &t);
+    ok = 0;
+    if (okp) { if (t == 0x01) memcpy(&ok, okp, 8); else if (t == 0x10) ok = rd_i32(okp); }
+    free(r3);
+    return ok > 0.5 ? 0 : -1;
 }
 
 void *vader_mongo_connect(const char *dsn) {
     char host[128] = "127.0.0.1", db[128] = "test";
     int port = 27017;
+    char user[128] = {0}, pass[128] = {0};
     const char *p = strstr(dsn, "://");
     p = p ? p + 3 : dsn;
     const char *at = strchr(p, '@');
-    if (at) p = at + 1;  /* skip user:pass@ */
+    if (at) {
+        const char *colon = memchr(p, ':', at - p);
+        if (colon) {
+            int ul = (int)(colon - p), pl = (int)(at - colon - 1);
+            if (ul < 127) { memcpy(user, p, ul); user[ul] = 0; }
+            if (pl < 127) { memcpy(pass, colon + 1, pl); pass[pl] = 0; }
+        } else {
+            int ul = (int)(at - p);
+            if (ul < 127) { memcpy(user, p, ul); user[ul] = 0; }
+        }
+        p = at + 1;
+    }
     const char *slash = strchr(p, '/');
     const char *hostend = slash ? slash : p + strlen(p);
     const char *colon = memchr(p, ':', hostend - p);
@@ -202,6 +369,11 @@ void *vader_mongo_connect(const char *dsn) {
     Mongo *m = calloc(1, sizeof(Mongo));
     m->fd = fd;
     strncpy(m->db, db, 127);
+    if (user[0] && mongo_auth(m, user, pass) != 0) {  /* authenticate if credentials given */
+        close(fd);
+        free(m);
+        return 0;
+    }
     return m;
 }
 
@@ -216,6 +388,8 @@ const char *vader_mongo_insert(void *mh, const char *coll, void *doc) {
     vader_json_set_str(cmd, "$db", m->db);
     void *reply = op_msg(m, cmd);
     if (!reply) return vader_strdup("mongo: request failed");
+    if (vader_json_as_float(vader_json_field(reply, "ok")) < 0.5)
+        return vader_strdup("mongo: insert rejected (auth?)");
     void *we = vader_json_field(reply, "writeErrors");
     if (vader_json_type(we) == JT_ARR && vader_json_keycount(we) > 0)
         return vader_strdup("mongo: write error");

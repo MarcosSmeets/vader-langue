@@ -150,7 +150,7 @@ db.run(st)                   // or db.query_stmt(st): Rows
 **std/mongo** — MongoDB document store (no auth; documents are `Json`):
 ```vader
 import "std/mongo"
-Mongo m = mongo.connect("mongodb://127.0.0.1:27017/mydb")
+Mongo m = mongo.connect("mongodb://127.0.0.1:27017/mydb")        // or mongodb://user:pass@host/db (SCRAM-SHA-256)
 Json doc = json.object()
 json.set_str(doc, "name", "Ada")
 mongo.insert(m, "users", doc)                    // returns error

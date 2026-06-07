@@ -27,6 +27,8 @@ const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
 const VADER_ROUTER_C: &str = include_str!("../runtime/vader_router.c");
 /// MongoDB client (BSON + OP_MSG): connect/insert/find/close.
 const VADER_MONGO_C: &str = include_str!("../runtime/vader_mongo.c");
+/// Shared SCRAM-SHA-256 crypto (used by the Mongo driver for auth).
+const VADER_SCRAM_C: &str = include_str!("../runtime/vader_scram.c");
 /// Arena/region allocator (long-lived service memory): bump-alloc per scope.
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 /// std/os and std/env: access to the process environment.
@@ -644,6 +646,7 @@ fn build_run_program(
     }
     if ir.contains("@vader_mongo_") {
         cmd.arg(cached_obj(&dir, "vader_mongo", VADER_MONGO_C, &[], quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_scram", VADER_SCRAM_C, &[], quiet)?);
     }
     cmd.arg("-o").arg(&bin);
     match cmd.status() {
