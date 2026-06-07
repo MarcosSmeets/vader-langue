@@ -59,7 +59,7 @@ can't run `vader` directly. Options, from best to simplest:
 4. Open a `.vd` file (e.g. `examples/shapes.vd`). Highlighting appears immediately; if
    the server is on, errors are underlined as you type.
 
-Or install it locally by copying the folder to `~/.vscode/extensions/vader-0.4.1` and
+Or install it locally by copying the folder to `~/.vscode/extensions/vader-0.5.0` and
 reopening VS Code.
 
 ## Settings
