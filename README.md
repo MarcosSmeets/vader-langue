@@ -83,7 +83,7 @@ irm https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.ps1
 ```
 
 Installs to `~/.local/bin` (override with `VADER_BINDIR`) and wires up your shell profile.
-Pin a version with `VADER_VERSION=v0.6.0`; skip the PATH edit with `VADER_NO_MODIFY_PATH=1`.
+Pin a version with `VADER_VERSION=v1.0.0`; skip the PATH edit with `VADER_NO_MODIFY_PATH=1`.
 For the native backends you also want `clang` (for `vader llvm`) and/or `go` (for `vader build`/`run`).
 
 **From source** — needs [Rust](https://rustup.rs):
@@ -121,19 +121,42 @@ server (`vader lsp`, the compiler itself), and right-click code generation. Sour
 
 ## Quick start
 
+**1. Install** (Linux / macOS — or run it inside WSL on Windows):
+
 ```bash
-vader new api my-project        # scaffold a Clean Architecture + TDD project
-cd my-project
-vader build                     # compile to a native binary (Go backend)
-vader run                       # compile and run
-vader test                      # run tests + coverage report
-vader gen usecase CreateOrder   # generate an artifact + its mirror test
+curl -fsSL https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.sh | sh
 ```
 
-Compile and run a single file natively via LLVM:
+**2. A running REST API in under a minute** — `vader new api` asks which database you
+want (SQLite / Postgres / MySQL / MongoDB), then scaffolds a project that already has a
+router, a `/health` route, a CRUD example, and a DB connection read from `DATABASE_URL`:
 
 ```bash
-vader llvm examples/maps.vd
+vader new api my-api
+cd my-api
+cp .env.example .env        # set DATABASE_URL (SQLite needs no server)
+vader llvm .                # builds natively and runs
+
+# in another terminal:
+curl localhost:8080/health                                  # {"status":"ok"}
+curl -X POST localhost:8080/users -d '{"name":"Ada"}'       # {"status":"created"}
+curl localhost:8080/users                                   # [{"id":1,"name":"Ada"}]
+```
+
+**3. Or just run a file:**
+
+```bash
+echo 'public fn main() { print("hello from Vader") }' > hello.vd
+vader llvm hello.vd
+```
+
+**Day-to-day toolchain:**
+
+```bash
+vader test                      # run tests + coverage gate
+vader gen usecase CreateOrder   # generate an artifact + its mirror test
+vader fmt . && vader lint .     # format + enforce the architecture rules
+vader llvm --out server .       # build a deployable binary (no run) — used by the Dockerfile
 ```
 
 ---

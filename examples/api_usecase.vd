@@ -25,3 +25,4 @@ fn (uc CreateUser) execute(name string): (User, error) {
     User user = User{ name: name }
     return uc.repo.save(user)
 }
+
