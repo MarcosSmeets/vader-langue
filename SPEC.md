@@ -148,8 +148,9 @@ to LLVM touches only the last box.
 - [x] **REAL SQLite driver** — `import "std/db"`: `sqlite3.c` (amalgamation, public domain)
       embedded and linked by clang in the native backend. API `open/exec/query/next/col_int/col_text/col_float/close`.
       **Zero install, self-contained binary.** `examples/db_sqlite.vd` runs (persists to a file). `.o` cache.
-- [x] **Postgres driver** (pure wire protocol + SCRAM-SHA-256, `postgres://...`) — compiles,
-      crypto (SHA-256) validated against a known vector; live round-trip pending. Same API.
+- [x] **Postgres driver** (pure wire protocol + MD5 + SCRAM-SHA-256, `postgres://...`) —
+      **live-verified** against PostgreSQL 16 (MD5 auth, create/insert/select). MD5 matches a
+      known vector (`md5("abc")`). Same API.
 - [x] **MySQL/MariaDB driver** (native protocol + `mysql_native_password`/SHA-1, `mysql://...`)
       — compiles, crypto (SHA-1) validated; live round-trip pending.
 - [x] **TLS for Postgres** (`vader llvm --tls`) — SSLRequest + OpenSSL under `#ifdef VADER_TLS`,
@@ -161,7 +162,7 @@ to LLVM touches only the last box.
       matches a reference vector; the rewritten auth flow is live-verified against MySQL 8.4
       (auth handshake + AuthSwitch + result loop). The RSA full-auth path compiles under
       `--tls`; live-verifying it needs `libssl-dev`.
-- [ ] MD5 auth (legacy Postgres) + the MySQL caching_sha2 full-auth live test — next phase
+- [ ] The MySQL caching_sha2 full-auth live test (needs `libssl-dev`) — next phase
 - [x] **Mongo driver** (`std/mongo`) — a document API (not SQL): `mongo.connect(dsn)`,
       `mongo.insert(m, coll, doc)`, `mongo.find(m, coll, query): docs`, `mongo.close(m)`.
       Own BSON encoder/decoder (reusing the `vader_json` value tree) + the OP_MSG wire protocol

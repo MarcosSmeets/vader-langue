@@ -1,6 +1,6 @@
 /* Vader runtime Postgres client (wire protocol v3) — self-contained.
  *
- * TCP + StartupMessage + authentication (trust / cleartext / SCRAM-SHA-256) +
+ * TCP + StartupMessage + authentication (trust / cleartext / MD5 / SCRAM-SHA-256) +
  * Simple Query Protocol, with results in text format. No libpq, no TLS
  * (v1: unencrypted connection — works for local/self-hosted PG without forced SSL).
  *
@@ -199,6 +199,74 @@ static int b64_decode(const char *in, int inlen, unsigned char *out) {
         }
     }
     return o;
+}
+
+/* ===================== MD5 (public domain) =============================== */
+typedef struct { unsigned int h[4]; unsigned long long len; unsigned char buf[64]; int n; } MD5_CTX;
+static const unsigned int md5_k[64] = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a,
+    0xa8304613, 0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+    0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340,
+    0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8,
+    0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+    0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
+    0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92,
+    0xffeff47d, 0x85845dd1, 0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+    0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391};
+static const int md5_r[64] = {7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+                              5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+                              4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+                              6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+static unsigned int md5_lrot(unsigned int x, int c) { return (x << c) | (x >> (32 - c)); }
+static void md5_block(MD5_CTX *ctx, const unsigned char *p) {
+    unsigned int m[16];
+    for (int i = 0; i < 16; i++)
+        m[i] = p[i * 4] | (p[i * 4 + 1] << 8) | (p[i * 4 + 2] << 16) | ((unsigned)p[i * 4 + 3] << 24);
+    unsigned int a = ctx->h[0], b = ctx->h[1], c = ctx->h[2], d = ctx->h[3];
+    for (int i = 0; i < 64; i++) {
+        unsigned int f;
+        int g;
+        if (i < 16) { f = (b & c) | (~b & d); g = i; }
+        else if (i < 32) { f = (d & b) | (~d & c); g = (5 * i + 1) & 15; }
+        else if (i < 48) { f = b ^ c ^ d; g = (3 * i + 5) & 15; }
+        else { f = c ^ (b | ~d); g = (7 * i) & 15; }
+        unsigned int tmp = d;
+        d = c; c = b;
+        b = b + md5_lrot(a + f + md5_k[i] + m[g], md5_r[i]);
+        a = tmp;
+    }
+    ctx->h[0] += a; ctx->h[1] += b; ctx->h[2] += c; ctx->h[3] += d;
+}
+static void md5_init(MD5_CTX *c) {
+    c->h[0] = 0x67452301; c->h[1] = 0xefcdab89; c->h[2] = 0x98badcfe; c->h[3] = 0x10325476;
+    c->len = 0; c->n = 0;
+}
+static void md5_update(MD5_CTX *c, const unsigned char *d, int len) {
+    c->len += (unsigned long long)len;
+    for (int i = 0; i < len; i++) {
+        c->buf[c->n++] = d[i];
+        if (c->n == 64) { md5_block(c, c->buf); c->n = 0; }
+    }
+}
+static void md5_final(MD5_CTX *c, unsigned char out[16]) {
+    unsigned long long bits = c->len * 8;
+    unsigned char pad = 0x80, z = 0;
+    md5_update(c, &pad, 1);
+    while (c->n != 56) md5_update(c, &z, 1);
+    unsigned char lb[8];
+    for (int i = 0; i < 8; i++) lb[i] = (bits >> (i * 8)) & 0xff;
+    md5_update(c, lb, 8);
+    for (int i = 0; i < 4; i++) {
+        out[i * 4] = c->h[i] & 0xff; out[i * 4 + 1] = (c->h[i] >> 8) & 0xff;
+        out[i * 4 + 2] = (c->h[i] >> 16) & 0xff; out[i * 4 + 3] = (c->h[i] >> 24) & 0xff;
+    }
+}
+static void md5_hex(const unsigned char *digest, char *out) {
+    static const char *hx = "0123456789abcdef";
+    for (int i = 0; i < 16; i++) { out[i * 2] = hx[digest[i] >> 4]; out[i * 2 + 1] = hx[digest[i] & 15]; }
+    out[32] = 0;
 }
 
 /* ===================== socket helpers ===================================== */
@@ -519,14 +587,35 @@ PgConn *vader_pg_connect(const char *dsn) {
             pg_send(c, 'p', (unsigned char *)pass, strlen(pass) + 1);
             continue;
         }
+        if (code == 5) {                                     /* MD5 */
+            unsigned char salt[4];
+            memcpy(salt, body + 4, 4);
+            free(body);
+            /* "md5" + md5( md5(password + username) + salt ) */
+            MD5_CTX m;
+            unsigned char dg[16];
+            char a[33], resp[36];
+            md5_init(&m);
+            md5_update(&m, (const unsigned char *)pass, strlen(pass));
+            md5_update(&m, (const unsigned char *)user, strlen(user));
+            md5_final(&m, dg);
+            md5_hex(dg, a);
+            md5_init(&m);
+            md5_update(&m, (const unsigned char *)a, 32);
+            md5_update(&m, salt, 4);
+            md5_final(&m, dg);
+            resp[0] = 'm'; resp[1] = 'd'; resp[2] = '5';
+            md5_hex(dg, resp + 3);          /* 32 hex chars + NUL at resp[35] */
+            pg_send(c, 'p', (unsigned char *)resp, 36);
+            continue;
+        }
         if (code == 10) {                                    /* SASL / SCRAM */
             free(body);
             if (scram_auth(c, user, pass) < 0) { c->fd = -1; return c; }
             continue;
         }
-        /* MD5 (5) and others not supported in v1 */
         free(body);
-        snprintf(c->err, sizeof(c->err), "auth method %u not supported (use trust/password/scram)", code);
+        snprintf(c->err, sizeof(c->err), "auth method %u not supported (use trust/password/md5/scram)", code);
         c->fd = -1;
         return c;
     }
