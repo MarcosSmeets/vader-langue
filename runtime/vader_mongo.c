@@ -410,6 +410,49 @@ void *vader_mongo_find(void *mh, const char *coll, void *query) {
     return batch;
 }
 
+/* update documents matching `filter` by applying $set with `changes`. */
+const char *vader_mongo_update(void *mh, const char *coll, void *filter, void *changes) {
+    Mongo *m = mh;
+    if (!m) return vader_strdup("mongo: not connected");
+    void *cmd = vader_json_object();
+    vader_json_set_str(cmd, "update", coll);
+    void *updates = vader_json_array();
+    void *one = vader_json_object();
+    vader_json_set(one, "q", filter);
+    void *set = vader_json_object();
+    vader_json_set(set, "$set", changes);
+    vader_json_set(one, "u", set);
+    vader_json_set_bool(one, "multi", 1);
+    vader_json_add(updates, one);
+    vader_json_set(cmd, "updates", updates);
+    vader_json_set_str(cmd, "$db", m->db);
+    void *reply = op_msg(m, cmd);
+    if (!reply) return vader_strdup("mongo: request failed");
+    if (vader_json_as_float(vader_json_field(reply, "ok")) < 0.5)
+        return vader_strdup("mongo: update rejected (auth?)");
+    return 0;
+}
+
+/* delete every document matching `filter` (limit 0 = all). */
+const char *vader_mongo_delete(void *mh, const char *coll, void *filter) {
+    Mongo *m = mh;
+    if (!m) return vader_strdup("mongo: not connected");
+    void *cmd = vader_json_object();
+    vader_json_set_str(cmd, "delete", coll);
+    void *deletes = vader_json_array();
+    void *one = vader_json_object();
+    vader_json_set(one, "q", filter);
+    vader_json_set_int(one, "limit", 0);
+    vader_json_add(deletes, one);
+    vader_json_set(cmd, "deletes", deletes);
+    vader_json_set_str(cmd, "$db", m->db);
+    void *reply = op_msg(m, cmd);
+    if (!reply) return vader_strdup("mongo: request failed");
+    if (vader_json_as_float(vader_json_field(reply, "ok")) < 0.5)
+        return vader_strdup("mongo: delete rejected (auth?)");
+    return 0;
+}
+
 void vader_mongo_close(void *mh) {
     Mongo *m = mh;
     if (m) {

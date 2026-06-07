@@ -285,10 +285,12 @@ impl Checker {
         // std/mongo: document store (Mongo -> opaque Unknown; documents are Json).
         if program.imports.iter().any(|i| i.starts_with("std/mongo")) {
             use Ty::*;
-            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 4] = [
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 6] = [
                 ("connect", vec![String], vec![Unknown]),
                 ("insert", vec![Unknown, String, Unknown], vec![Error]),
                 ("find", vec![Unknown, String, Unknown], vec![Unknown]),
+                ("update", vec![Unknown, String, Unknown, Unknown], vec![Error]),
+                ("delete", vec![Unknown, String, Unknown], vec![Error]),
                 ("close", vec![Unknown], vec![]),
             ];
             for (name, params, returns) in sigs {

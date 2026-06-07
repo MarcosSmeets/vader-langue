@@ -155,6 +155,8 @@ Json doc = json.object()
 json.set_str(doc, "name", "Ada")
 mongo.insert(m, "users", doc)                    // returns error
 Json results = mongo.find(m, "users", json.object())  // filter {} = all; returns a Json array
+mongo.update(m, "users", filter, changes)        // $set `changes` on docs matching `filter`
+mongo.delete(m, "users", filter)                 // delete docs matching `filter` ({} = all)
 mongo.close(m)
 ```
 
