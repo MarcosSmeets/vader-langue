@@ -185,6 +185,15 @@ to LLVM touches only the last box.
       (alongside `std/http`, `std/db`, `std/json`, `std/env`, `std/mem`, `std/mongo`). Verified
       end-to-end (`examples/stdlib_demo.vd`).
 
+### Runtime safety
+
+- [x] **Bounds-checked slice/array access** — `xs[i]` (read and write) panics with the source
+      line if `i` is out of `[0, len)`, instead of corrupting memory. `vader_bounds`/`vader_panic`
+      in the runtime. **Verified** (in-bounds runs; out-of-bounds read/write panic + exit 1).
+- [x] **`assert cond`** in regular code panics with the line when false (was test-only).
+- Integers wrap on overflow (two's complement, like Go/C) — by design, not a trap.
+- [ ] nil-deref guards (field access on a nil struct still faults) — future work.
+
 ### Platform support
 
 - **`vader build` / `vader run`** (Go backend): Linux, macOS, Windows (needs Go). Native everywhere.

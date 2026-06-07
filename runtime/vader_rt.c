@@ -2,8 +2,23 @@
 // Linked by `clang` together with the generated LLVM IR. Memory leaks (no GC, for now).
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// ---- runtime safety: panics print a message + location and abort (exit 1) ----
+void vader_panic(const char *msg) {
+    fprintf(stderr, "panic: %s\n", msg);
+    exit(1);
+}
+// slice/array bounds check: aborts if `idx` is outside [0, len).
+void vader_bounds(long long idx, long long len, long long line) {
+    if (idx < 0 || idx >= len) {
+        fprintf(stderr, "panic: index out of bounds at line %lld: index %lld, length %lld\n",
+                line, idx, len);
+        exit(1);
+    }
+}
 
 typedef struct {
     char *buf;        // circular buffer: cap slots of elemsize bytes

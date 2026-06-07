@@ -83,6 +83,7 @@ struct Needs {
     time: bool,
     math: bool,
     fmt: bool,
+    bounds: bool,
 }
 
 enum MatchMode {
@@ -371,6 +372,12 @@ pub fn generate(program: &Program) -> Result<String, String> {
     if g.needs.env {
         result.push_str("declare i8* @vader_env_read(i8*)\n");
     }
+    if g.needs.bounds {
+        result.push_str(
+            "declare void @vader_panic(i8*)\n\
+             declare void @vader_bounds(i64, i64, i64)\n",
+        );
+    }
     if g.needs.mongo {
         result.push_str(
             "declare i8* @vader_mongo_connect(i8*)\n\
@@ -543,6 +550,17 @@ impl Gen {
             Type::Generic(name, _) if name == "chan" || name == "map" => Ok("i8*".to_string()),
             _ => Err("LLVM backend: unsupported generic type".into()),
         }
+    }
+
+    /// Emits a runtime bounds check for a slice index (panics with the line on overflow).
+    fn bounds_check(&mut self, slice_ty: &str, slice_val: &str, idx: &str, line: usize) {
+        let len = self.fresh();
+        self.emit(&format!("{} = extractvalue {} {}, 1", len, slice_ty, slice_val));
+        self.emit(&format!(
+            "call void @vader_bounds(i64 {}, i64 {}, i64 {})",
+            idx, len, line
+        ));
+        self.needs.bounds = true;
     }
 
     /// Extracts the element type of a slice `{ T*, i64 }` -> `T`.
@@ -762,6 +780,7 @@ impl Gen {
                     let ptr = self.fresh();
                     self.emit(&format!("{} = extractvalue {} {}, 0", ptr, bt, bv));
                     let (iv, _) = self.gen_expr(index)?;
+                    self.bounds_check(&bt, &bv, &iv, target.line);
                     let ep = self.fresh();
                     self.emit(&format!(
                         "{} = getelementptr {}, {}* {}, i64 {}",
@@ -833,7 +852,20 @@ impl Gen {
                 Ok(())
             }
             Stmt::Spawn(call) => self.gen_spawn(call),
-            Stmt::Assert(_) => Err("LLVM backend: `assert` outside a test is not supported".into()),
+            Stmt::Assert(e) => {
+                // `assert cond` panics with the source line if `cond` is false.
+                let (c, _) = self.gen_expr(e)?;
+                let ok_l = self.fresh_label("assertok");
+                let fail_l = self.fresh_label("assertfail");
+                self.emit(&format!("br i1 {}, label %{}, label %{}", c, ok_l, fail_l));
+                self.label(&fail_l);
+                let msg = self.string_ptr(&format!("assertion failed at line {}", e.line));
+                self.emit(&format!("call void @vader_panic(i8* {})", msg));
+                self.emit("unreachable");
+                self.needs.bounds = true;
+                self.label(&ok_l);
+                Ok(())
+            }
         }
     }
 
@@ -1309,6 +1341,7 @@ impl Gen {
                 let (bv, bt) = self.gen_expr(base)?;
                 let (iv, _) = self.gen_expr(index)?;
                 let elemty = Self::slice_elem(&bt);
+                self.bounds_check(&bt, &bv, &iv, e.line);
                 let ptr = self.fresh();
                 self.emit(&format!("{} = extractvalue {} {}, 0", ptr, bt, bv));
                 let ep = self.fresh();
