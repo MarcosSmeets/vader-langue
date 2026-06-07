@@ -27,9 +27,11 @@ winget install Marco.Vader
 
 ## Refreshing for a new release
 
-Bump `PackageVersion` and the installer `InstallerUrl`/`InstallerSha256` in the manifests
-(or rerun `wingetcreate update Marco.Vader`). The SHA-256 is published next to each asset as
-`<asset>.sha256`, or compute it locally with `Get-FileHash`.
+Each `v*` tag triggers `.github/workflows/release.yml`, which builds the binaries, publishes
+a `<asset>.sha256` for each, and **regenerates these manifests + the Homebrew formula**
+(`packaging/bump.sh`) committed back to `main`. To push the update into the winget catalog,
+open a PR to [microsoft/winget-pkgs] with the new version folder (or rerun
+`wingetcreate update Marco.Vader`).
 
 > Note: the GitHub release tag (`v0.4.0`) is the package version; the compiler's own
 > `vader version` reports its internal number independently.

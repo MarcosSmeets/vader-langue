@@ -52,3 +52,37 @@ jobs:
           files: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.sha256
+
+  # After the binaries + checksums are published, regenerate the Homebrew formula
+  # and winget manifests from those checksums and commit them back to main.
+  bump-packaging:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: regenerate packaging from release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          tmp="$(mktemp -d)"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$tmp" --pattern '*.sha256'
+          sum() { awk '{print $1}' "$tmp/$1.sha256"; }
+          export SHA_LINUX="$(sum vader-linux-x86_64)"
+          export SHA_MACOS_X64="$(sum vader-macos-x86_64)"
+          export SHA_MACOS_ARM64="$(sum vader-macos-arm64)"
+          export SHA_WIN="$(sum vader-windows-x86_64.exe)"
+          sh packaging/bump.sh "$ver"
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/homebrew/vader.rb packaging/winget/manifests
+          if git diff --cached --quiet; then
+            echo "no packaging changes"
+          else
+            git commit -m "chore(release): bump packaging to ${GITHUB_REF_NAME} [skip ci]"
+            git push origin HEAD:main
+          fi
