@@ -12,6 +12,8 @@
 
 /* arena allocator (vader_mem.c): database reads are per-request scratch */
 extern char *vader_strdup(const char *s);
+extern void *vader_alloc(long n);
+extern void *vader_realloc(void *old, long oldn, long newn);
 
 /* Postgres driver (vader_pg.c) — seen as opaque pointers here */
 extern void *vader_pg_connect(const char *dsn);
@@ -150,6 +152,83 @@ void vader_db_must(void *handle, const char *sql) {
         fprintf(stderr, "SQL error: %s\n", err);
         exit(1);
     }
+}
+
+/* ---- parameterized queries: `?` placeholders + bind, safe client-side substitution ---- */
+typedef struct {
+    void *db;
+    char *sql;
+    char **vals;
+    int nvals, cap;
+} VStmt;
+
+void *vader_db_prepare(void *dbh, const char *sql) {
+    VStmt *st = vader_alloc(sizeof(VStmt));
+    st->db = dbh;
+    st->sql = vader_strdup(sql);
+    st->vals = 0;
+    st->nvals = 0;
+    st->cap = 0;
+    return st;
+}
+
+static void stmt_push(VStmt *st, char *v) {
+    if (st->nvals >= st->cap) {
+        int oc = st->cap;
+        st->cap = oc ? oc * 2 : 4;
+        st->vals = vader_realloc(st->vals, oc * sizeof(char *), st->cap * sizeof(char *));
+    }
+    st->vals[st->nvals++] = v;
+}
+
+/* a string param is SQL-escaped (single quotes doubled) and wrapped in quotes. */
+void vader_db_bind_str(void *sth, const char *v) {
+    int len = (int)strlen(v);
+    char *buf = vader_alloc(len * 2 + 3);
+    int o = 0;
+    buf[o++] = '\'';
+    for (int i = 0; i < len; i++) {
+        if (v[i] == '\'') buf[o++] = '\'';
+        buf[o++] = v[i];
+    }
+    buf[o++] = '\'';
+    buf[o] = 0;
+    stmt_push(sth, buf);
+}
+void vader_db_bind_int(void *sth, long long v) {
+    char *buf = vader_alloc(32);
+    snprintf(buf, 32, "%lld", v);
+    stmt_push(sth, buf);
+}
+void vader_db_bind_float(void *sth, double v) {
+    char *buf = vader_alloc(32);
+    snprintf(buf, 32, "%.17g", v);
+    stmt_push(sth, buf);
+}
+
+/* builds the final SQL by replacing each `?` with the next bound value. */
+static char *stmt_build(VStmt *st) {
+    int total = (int)strlen(st->sql) + 1;
+    for (int i = 0; i < st->nvals; i++) total += (int)strlen(st->vals[i]);
+    char *out = vader_alloc(total + 1);
+    int o = 0, vi = 0;
+    for (int i = 0; st->sql[i]; i++) {
+        if (st->sql[i] == '?' && vi < st->nvals) {
+            const char *v = st->vals[vi++];
+            while (*v) out[o++] = *v++;
+        } else {
+            out[o++] = st->sql[i];
+        }
+    }
+    out[o] = 0;
+    return out;
+}
+
+const char *vader_db_run(void *sth) {
+    return vader_db_exec(((VStmt *)sth)->db, stmt_build(sth));
+}
+void *vader_db_query_stmt(void *sth) {
+    return vader_db_query(((VStmt *)sth)->db, stmt_build(sth));
 }
 
 void vader_db_close(void *handle) {

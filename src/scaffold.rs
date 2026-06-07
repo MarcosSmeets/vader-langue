@@ -7,7 +7,8 @@
 /// Default architecture for each project kind.
 pub fn default_arch(kind: &str) -> &'static str {
     match kind {
-        "api" | "worker" => "clean",
+        "api" => "tdd", // turnkey REST API: native router + DB-from-env + health-check
+        "worker" => "clean",
         _ => "minimal",
     }
 }
@@ -167,8 +168,10 @@ fn api_tdd_files(name: &str, db: &str) -> Vec<(String, String)> {
                  DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
                  Json body = json.parse(http.body(s))\n    \
                  string name = json.as_str(json.field(body, \"name\"))\n    \
-                 // TODO: use parameterized queries in production (this concat is unsafe).\n    \
-                 db.must(conn, \"INSERT INTO users (name) VALUES ('\" + name + \"')\")\n    \
+                 // parameterized query — `?` placeholders, no string concatenation.\n    \
+                 Stmt st = db.prepare(conn, \"INSERT INTO users (name) VALUES (?)\")\n    \
+                 db.bind_str(st, name)\n    \
+                 db.run(st)\n    \
                  http.respond(s, 201, \"application/json\", \"{\\\"status\\\":\\\"created\\\"}\")\n    \
                  db.close(conn)\n\
              }\n"
@@ -514,7 +517,7 @@ mod tests {
 
     #[test]
     fn default_arch_per_kind() {
-        assert_eq!(default_arch("api"), "clean");
+        assert_eq!(default_arch("api"), "tdd");
         assert_eq!(default_arch("cli"), "minimal");
         assert_eq!(default_arch("lib"), "minimal");
     }

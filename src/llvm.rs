@@ -296,7 +296,13 @@ pub fn generate(program: &Program) -> Result<String, String> {
              declare i64 @vader_db_col_int(i8*, i32)\n\
              declare double @vader_db_col_float(i8*, i32)\n\
              declare i8* @vader_db_col_text(i8*, i32)\n\
-             declare void @vader_db_close(i8*)\n",
+             declare void @vader_db_close(i8*)\n\
+             declare i8* @vader_db_prepare(i8*, i8*)\n\
+             declare void @vader_db_bind_str(i8*, i8*)\n\
+             declare void @vader_db_bind_int(i8*, i64)\n\
+             declare void @vader_db_bind_float(i8*, double)\n\
+             declare i8* @vader_db_run(i8*)\n\
+             declare i8* @vader_db_query_stmt(i8*)\n",
         );
     }
     if g.needs.http {
@@ -416,7 +422,7 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" | "Server" | "Json" | "Arena" | "Router" => "i8*".to_string(), // opaque stdlib handles
+                "DB" | "Rows" | "Server" | "Json" | "Arena" | "Router" | "Stmt" => "i8*".to_string(), // opaque stdlib handles
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -1442,6 +1448,12 @@ impl Gen {
             "col_float" => ("vader_db_col_float", "double", &["i8*", "i32"]),
             "col_text" => ("vader_db_col_text", "i8*", &["i8*", "i32"]),
             "close" => ("vader_db_close", "void", &["i8*"]),
+            "prepare" => ("vader_db_prepare", "i8*", &["i8*", "i8*"]),
+            "bind_str" => ("vader_db_bind_str", "void", &["i8*", "i8*"]),
+            "bind_int" => ("vader_db_bind_int", "void", &["i8*", "i64"]),
+            "bind_float" => ("vader_db_bind_float", "void", &["i8*", "double"]),
+            "run" => ("vader_db_run", "i8*", &["i8*"]),
+            "query_stmt" => ("vader_db_query_stmt", "i8*", &["i8*"]),
             _ => return Ok(None),
         };
         self.needs.db = true;

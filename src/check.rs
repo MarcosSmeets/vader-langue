@@ -70,7 +70,7 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
         enums: HashSet::new(),
         interfaces: HashSet::new(),
         type_params: HashSet::new(),
-        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena", "Router"]
+        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena", "Router", "Stmt"]
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -182,7 +182,7 @@ impl Checker {
         // DB/Rows are opaque handles (resolve to Unknown, which is lenient).
         if program.imports.iter().any(|i| i.starts_with("std/db")) {
             use Ty::*;
-            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 9] = [
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 15] = [
                 ("open", vec![String], vec![Unknown]),
                 ("exec", vec![Unknown, String], vec![Error]),
                 ("must", vec![Unknown, String], vec![]),
@@ -192,6 +192,12 @@ impl Checker {
                 ("col_text", vec![Unknown, Int], vec![String]),
                 ("col_float", vec![Unknown, Int], vec![Float]),
                 ("close", vec![Unknown], vec![]),
+                ("prepare", vec![Unknown, String], vec![Unknown]),
+                ("bind_str", vec![Unknown, String], vec![]),
+                ("bind_int", vec![Unknown, Int], vec![]),
+                ("bind_float", vec![Unknown, Float], vec![]),
+                ("run", vec![Unknown], vec![Error]),
+                ("query_stmt", vec![Unknown], vec![Unknown]),
             ];
             for (name, params, returns) in sigs {
                 self.functions

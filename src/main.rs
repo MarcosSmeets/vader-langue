@@ -582,7 +582,7 @@ fn build_run_program(
             }
             let st = Command::new("clang")
                 .arg("-c")
-                .arg("-O2")
+                .arg("-O1") // SQLite is a 9.5MB amalgamation; -O1 keeps the first build fast
                 .arg(&src)
                 .arg("-o")
                 .arg(&obj)
@@ -927,7 +927,11 @@ fn cmd_new(args: &[String]) -> ExitCode {
 
 /// Interactive prompt to choose the database for a turnkey API project.
 fn prompt_database() -> Option<String> {
-    use std::io::Write;
+    use std::io::{IsTerminal, Write};
+    // non-interactive (scripts/CI): default to sqlite instead of blocking on stdin.
+    if !std::io::stdin().is_terminal() {
+        return Some("sqlite".to_string());
+    }
     println!("Choose a database for the API:");
     println!("  1) sqlite    (zero setup, embedded — recommended to start)");
     println!("  2) postgres");
