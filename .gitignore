@@ -6,3 +6,5 @@
 **/node_modules/
 *.vsix
 editors/vscode/package-lock.json
+
+.env
