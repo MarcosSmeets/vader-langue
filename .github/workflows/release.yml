@@ -1,5 +1,5 @@
-# Build cross-platform + publica binários ao dar push numa tag `v*`.
-# (Template: requer o repositório no GitHub. Não testado nesta máquina.)
+# Cross-compiles and publishes binaries when a `v*` tag is pushed. These assets
+# are what `install.sh` / `install.ps1` download from `releases/latest`.
 name: release
 
 on:
@@ -33,7 +33,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }}
-      - name: empacota binário
+      - name: package binary
         shell: bash
         run: |
           src="target/${{ matrix.target }}/release/vader"

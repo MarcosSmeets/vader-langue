@@ -84,16 +84,31 @@ LLVM ready (self-sufficient toolchain, no Go), so distribution got clean.
 
 ## Installing the compiler
 
-### From source (works today)
+### Quick install (prebuilt binary)
+The installer detects your OS/arch, downloads the matching binary from the latest GitHub
+Release, drops it in `~/.local/bin` (override with `VADER_BINDIR`), and adds it to your PATH.
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.sh | sh
+```
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.ps1 | iex
+```
+Env vars: `VADER_VERSION` (e.g. `v0.6.0`, default `latest`), `VADER_BINDIR`,
+`VADER_NO_MODIFY_PATH=1`. Requires a published release (see below) — `install.sh` reads from
+`releases/latest/download/<asset>`.
+
+### From source
 Needs Rust (`cargo`) and, for the native backend, `clang`.
 ```bash
-./install.sh                 # cargo build --release + installs into ~/.local/bin
-# or: VADER_BINDIR=/usr/local/bin ./install.sh
+./install.sh --source          # cargo build --release + installs into ~/.local/bin
+# or: VADER_BINDIR=/usr/local/bin ./install.sh --source
 vader version
 ```
 
-### From releases (once there's a GitHub repo)
-- **Linux/macOS:** download the release binary, `chmod +x`, move it to the PATH.
+### Package managers
 - **Homebrew:** `brew install YOUR-USERNAME/tap/vader` (`packaging/homebrew/vader.rb`).
 - **Windows (winget):** `winget install Marco.Vader` (`packaging/winget/`).
 

@@ -70,24 +70,36 @@ them with `benchmarks/run.sh`.
 
 ## Install
 
-You need [Rust](https://rustup.rs). For native compilation you also need a backend toolchain:
-`clang` (for `vader llvm`) and/or `go` (for `vader build` / `vader run`).
+**One line — Linux / macOS** (downloads a prebuilt binary and adds it to your PATH):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.sh | sh
+```
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/MarcosSmeets/vader-langue/main/install.ps1 | iex
+```
+
+Installs to `~/.local/bin` (override with `VADER_BINDIR`) and wires up your shell profile.
+Pin a version with `VADER_VERSION=v0.6.0`; skip the PATH edit with `VADER_NO_MODIFY_PATH=1`.
+For the native backends you also want `clang` (for `vader llvm`) and/or `go` (for `vader build`/`run`).
+
+**From source** — needs [Rust](https://rustup.rs):
 
 ```bash
 git clone https://github.com/MarcosSmeets/vader-langue.git
 cd vader-langue
-./install.sh          # cargo build --release  →  installs to ~/.local/bin
+./install.sh --source     # cargo build --release  →  installs to ~/.local/bin
 vader version
 ```
 
-`install.sh` honors `VADER_BINDIR` if you want a different install directory. If `~/.local/bin`
-isn't on your `PATH`, the script prints the line to add.
+> **Windows / WSL:** the prebuilt binary is a Linux ELF. If you develop under WSL, run the
+> `curl | sh` installer *inside* WSL (and use Remote-WSL in VS Code) so the editor and
+> compiler share the same environment. See [`editors/vscode/README.md`](editors/vscode/README.md).
 
-> **Windows / WSL:** the toolchain builds a Linux ELF binary under WSL. Run `vader` from
-> inside WSL (and, in VS Code, use Remote-WSL) so the editor and compiler share the same
-> environment. See [`editors/vscode/README.md`](editors/vscode/README.md) for details.
-
-Distribution channels (releases, Homebrew, winget, Docker): [`docs/distribution.md`](docs/distribution.md).
+Other channels (Homebrew, winget, Docker): [`docs/distribution.md`](docs/distribution.md).
 
 ---
 
