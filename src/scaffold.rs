@@ -55,7 +55,11 @@ fn dockerfile(name: &str) -> String {
 
 /// Creates the project on disk under `<name>/`. Fails if the directory already exists.
 pub fn create(kind: &str, arch: &str, name: &str) -> Result<Vec<String>, String> {
-    let files = files_for(kind, arch, name)?;
+    write_project(name, files_for(kind, arch, name)?)
+}
+
+/// Writes a list of (relative path, content) under `<name>/`.
+fn write_project(name: &str, files: Vec<(String, String)>) -> Result<Vec<String>, String> {
     let root = std::path::Path::new(name);
     if root.exists() {
         return Err(format!("directory `{}` already exists", name));
@@ -70,6 +74,141 @@ pub fn create(kind: &str, arch: &str, name: &str) -> Result<Vec<String>, String>
         created.push(full.to_string_lossy().replace('\\', "/"));
     }
     Ok(created)
+}
+
+/// Turnkey API project (arch `tdd`): native HTTP router with a default health-check
+/// route, a CRUD example, and a DB connection whose DSN comes from the environment.
+/// `db` is one of sqlite/postgres/mysql. Builds with `vader llvm .`.
+pub fn create_api_tdd(name: &str, db: &str) -> Result<Vec<String>, String> {
+    write_project(name, api_tdd_files(name, db))
+}
+
+/// CREATE TABLE statement for the chosen database engine.
+fn db_create_sql(db: &str) -> &'static str {
+    match db {
+        "postgres" => "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT)",
+        "mysql" => {
+            "CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255))"
+        }
+        _ => "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)",
+    }
+}
+
+/// Example DSN for `.env`, per engine.
+fn db_dsn_example(db: &str, name: &str) -> String {
+    match db {
+        "postgres" => format!("postgres://postgres:password@localhost:5432/{name}"),
+        "mysql" => format!("mysql://root:password@localhost:3306/{name}"),
+        _ => format!("./{name}.db"),
+    }
+}
+
+fn api_tdd_files(name: &str, db: &str) -> Vec<(String, String)> {
+    let create_sql = db_create_sql(db);
+    let dsn = db_dsn_example(db, name);
+    vec![
+        f(
+            "vader.toml",
+            format!(
+                "[project]\nname         = \"{name}\"\nversion      = \"0.1.0\"\nkind         = \"api\"\narchitecture = \"tdd\"\n\n\
+                 [database]\nengine = \"{db}\"\n# the DSN is read from the DATABASE_URL environment variable\n\n\
+                 [test]\ncoverage_gate = true\nmin_coverage  = 80\n",
+            ),
+        ),
+        f(
+            ".env.example",
+            format!("# copy to .env and adjust; the app reads DATABASE_URL at startup\nDATABASE_URL={dsn}\n"),
+        ),
+        f(
+            "cmd/main.vd",
+            format!(
+                "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\n\n\
+                 // Entry point: wire the routes and start the server.\n\
+                 public fn main() {{\n    \
+                     // The DB connection string comes from the environment — just set DATABASE_URL.\n    \
+                     DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+                     db.must(conn, \"{create_sql}\")\n    \
+                     db.close(conn)\n\n    \
+                     Router r = newRouter()\n    \
+                     r.get(\"/health\", health)      // default health-check route\n    \
+                     r.get(\"/users\", listUsers)\n    \
+                     r.post(\"/users\", createUser)\n\n    \
+                     print(\"listening on http://localhost:8080\")\n    \
+                     serve(8080, r)\n\
+                 }}\n",
+            ),
+        ),
+        f(
+            "handlers/health.vd",
+            "import \"std/http\"\n\n\
+             // Default health-check route — handy for load balancers and uptime checks.\n\
+             public fn health(s Server) {\n    \
+                 http.respond(s, 200, \"application/json\", \"{\\\"status\\\":\\\"ok\\\"}\")\n\
+             }\n"
+                .to_string(),
+        ),
+        f(
+            "handlers/users.vd",
+            "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\nimport \"std/json\"\n\n\
+             public fn listUsers(s Server) {\n    \
+                 DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+                 Rows rows = db.query(conn, \"SELECT id, name FROM users ORDER BY id\")\n    \
+                 Json arr = json.array()\n    \
+                 for db.next(rows) {\n        \
+                     Json u = json.object()\n        \
+                     json.set_int(u, \"id\", db.col_int(rows, 0))\n        \
+                     json.set_str(u, \"name\", db.col_text(rows, 1))\n        \
+                     json.add(arr, u)\n    \
+                 }\n    \
+                 http.respond(s, 200, \"application/json\", json.encode(arr))\n    \
+                 db.close(conn)\n\
+             }\n\n\
+             public fn createUser(s Server) {\n    \
+                 DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+                 Json body = json.parse(http.body(s))\n    \
+                 string name = json.as_str(json.field(body, \"name\"))\n    \
+                 // TODO: use parameterized queries in production (this concat is unsafe).\n    \
+                 db.must(conn, \"INSERT INTO users (name) VALUES ('\" + name + \"')\")\n    \
+                 http.respond(s, 201, \"application/json\", \"{\\\"status\\\":\\\"created\\\"}\")\n    \
+                 db.close(conn)\n\
+             }\n"
+                .to_string(),
+        ),
+        f(
+            "domain/user.vd",
+            "// User entity.\npublic struct User {\n    id   int\n    name string\n}\n".to_string(),
+        ),
+        f(
+            "domain/user_test.vd",
+            "// auto-generated mirror test for the entity.\n\
+             test \"user holds its fields\" {\n    \
+                 User u = User{ id: 1, name: \"Ada\" }\n    \
+                 assert u.id == 1\n    \
+                 assert u.name == \"Ada\"\n\
+             }\n"
+                .to_string(),
+        ),
+        f("Dockerfile", dockerfile_native()),
+        f(".dockerignore", ".git\n/target\n.env\n".to_string()),
+    ]
+}
+
+/// Dockerfile for a natively-built API: `vader llvm --out` then a slim libc base
+/// (the native binary embeds SQLite but links libc dynamically, so not `scratch`).
+fn dockerfile_native() -> String {
+    "# syntax=docker/dockerfile:1\n\n\
+     # --- build: compile to a native binary (no run) ---\n\
+     FROM vader/toolchain:latest AS build\n\
+     WORKDIR /src\n\
+     COPY . .\n\
+     RUN vader llvm --out /out/server .\n\n\
+     # --- runtime: slim image with libc ---\n\
+     FROM debian:bookworm-slim\n\
+     COPY --from=build /out/server /app/server\n\
+     ENV DATABASE_URL=\"\"\n\
+     EXPOSE 8080\n\
+     ENTRYPOINT [\"/app/server\"]\n"
+        .to_string()
 }
 
 fn f(path: &str, content: String) -> (String, String) {

@@ -453,7 +453,26 @@ fn write_lock(deps: &[pkg::Dep]) {
 
 /// `vader llvm <file.vd>` — Vader -> LLVM IR (text) -> clang -> native binary -> run.
 fn cmd_llvm(args: &[String]) -> ExitCode {
-    let path = match args.iter().skip(2).find(|a| !a.starts_with("--")) {
+    // parse: first non-flag arg is the file/dir; `--out <path>` builds without running.
+    let mut path: Option<&String> = None;
+    let mut out: Option<&str> = None;
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--out" => {
+                out = args.get(i + 1).map(|s| s.as_str());
+                i += 2;
+            }
+            a if a.starts_with("--") => i += 1,
+            _ => {
+                if path.is_none() {
+                    path = Some(&args[i]);
+                }
+                i += 1;
+            }
+        }
+    }
+    let path = match path {
         Some(p) => p,
         None => {
             usage();
@@ -464,12 +483,12 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
     // A directory builds the whole project natively (flattened by the module system).
     let result = if Path::new(path).is_dir() {
         match module::load(path, false) {
-            Ok(program) => build_run_program(&program, false, tls),
+            Ok(program) => build_run_program(&program, false, tls, out),
             Err(e) => Err(e),
         }
     } else {
         match std::fs::read_to_string(path) {
-            Ok(source) => build_run_source(&source, false, tls),
+            Ok(source) => build_run_source(&source, false, tls, out),
             Err(e) => Err(format!("cannot read `{}`: {}", path, e)),
         }
     };
@@ -484,7 +503,7 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
 
 /// Compiles a Vader source via LLVM + clang and runs the binary (Result, for reuse).
 /// `quiet` suppresses the progress logs (used by `vader migrate`).
-fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> {
+fn build_run_source(source: &str, quiet: bool, tls: bool, out: Option<&str>) -> Result<(), String> {
     let tokens = lexer::tokenize(source).map_err(|e| e.to_string())?;
     let mut program = parser::parse(tokens).map_err(|e| e.to_string())?;
     if !program.imports.is_empty() {
@@ -495,12 +514,17 @@ fn build_run_source(source: &str, quiet: bool, tls: bool) -> Result<(), String> 
             .collect();
         module::normalize(&mut program, &packages);
     }
-    build_run_program(&program, quiet, tls)
+    build_run_program(&program, quiet, tls, out)
 }
 
 /// Type-checks, generates LLVM IR, compiles with clang and runs. Used by
 /// `vader llvm <file|dir>` and `vader migrate`.
-fn build_run_program(program: &Program, quiet: bool, tls: bool) -> Result<(), String> {
+fn build_run_program(
+    program: &Program,
+    quiet: bool,
+    tls: bool,
+    out: Option<&str>,
+) -> Result<(), String> {
     if let Err(errors) = check::check(program) {
         let msg = errors
             .iter()
@@ -514,7 +538,18 @@ fn build_run_program(program: &Program, quiet: bool, tls: bool) -> Result<(), St
     let dir = std::env::temp_dir().join("vader_llvm");
     std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
     let ll = dir.join("out.ll");
-    let bin = dir.join("out");
+    let bin = match out {
+        Some(p) => {
+            let pb = std::path::PathBuf::from(p);
+            if let Some(parent) = pb.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| format!("out dir: {}", e))?;
+                }
+            }
+            pb
+        }
+        None => dir.join("out"),
+    };
     std::fs::write(&ll, &ir).map_err(|e| format!("write IR: {}", e))?;
     if !quiet {
         println!("emitted LLVM IR: {}", ll.display());
@@ -600,6 +635,13 @@ fn build_run_program(program: &Program, quiet: bool, tls: bool) -> Result<(), St
         Ok(_) => return Err("clang failed to compile the IR".into()),
         Err(e) => return Err(format!("failed to invoke `clang`: {} (on PATH?)", e)),
     }
+    // `--out`: build only, don't run (for Docker / producing a deployable binary).
+    if out.is_some() {
+        if !quiet {
+            println!("built -> {}", bin.display());
+        }
+        return Ok(());
+    }
     if !quiet {
         println!("compiled with clang -> {}\n--- running ---", bin.display());
     }
@@ -661,7 +703,7 @@ fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
         }
         for name in pend {
             println!("\u{25B6} applying {} ...", name);
-            build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true, tls)
+            build_run_source(&migration_program(&dsn, &migrate::up_sql(&name)), true, tls, None)
                 .map_err(|e| format!("failed at {}: {}", name, e))?;
             migrate::mark_applied(&name)?;
         }
@@ -671,7 +713,7 @@ fn migrate_run(args: &[String], up: bool) -> Result<(), String> {
             None => println!("no migration applied."),
             Some(name) => {
                 println!("\u{25C0} reverting {} ...", name);
-                build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true, tls)
+                build_run_source(&migration_program(&dsn, &migrate::down_sql(&name)), true, tls, None)
                     .map_err(|e| format!("failed to revert {}: {}", name, e))?;
                 migrate::unmark(&name)?;
                 println!("ok — reverted {}", name);
@@ -818,18 +860,51 @@ fn cmd_new(args: &[String]) -> ExitCode {
     }
 
     let mut arch = scaffold::default_arch(kind).to_string();
+    let mut db_flag: Option<String> = None;
     let mut i = 4;
     while i < args.len() {
         if args[i] == "--arch" && i + 1 < args.len() {
             arch = args[i + 1].clone();
+            i += 2;
+        } else if args[i] == "--db" && i + 1 < args.len() {
+            db_flag = Some(args[i + 1].clone());
             i += 2;
         } else {
             eprintln!("error: unexpected argument `{}`", args[i]);
             return ExitCode::FAILURE;
         }
     }
+
+    // `tdd` is the turnkey API architecture: native HTTP router + DB-from-env + health-check.
+    if arch == "tdd" {
+        let db = match db_flag.or_else(prompt_database) {
+            Some(d) => d,
+            None => return ExitCode::FAILURE,
+        };
+        if !matches!(db.as_str(), "sqlite" | "postgres" | "mysql") {
+            eprintln!("error: unknown database `{}` (sqlite|postgres|mysql)", db);
+            return ExitCode::FAILURE;
+        }
+        return match scaffold::create_api_tdd(name, &db) {
+            Ok(created) => {
+                println!("created `{}` (api / tdd, {}):", name, db);
+                for path in &created {
+                    println!("  {}", path);
+                }
+                println!(
+                    "\nnext:\n  cd {name}\n  cp .env.example .env    # set DATABASE_URL\n  vader llvm .            # build + run natively\n\nroutes: GET /health, GET /users, POST /users"
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     if !matches!(arch.as_str(), "clean" | "hexagonal" | "mvc" | "minimal") {
-        eprintln!("error: unknown arch `{}` (clean|hexagonal|mvc|minimal)", arch);
+        eprintln!("error: unknown arch `{}` (clean|hexagonal|mvc|minimal|tdd)", arch);
         return ExitCode::FAILURE;
     }
 
@@ -845,6 +920,30 @@ fn cmd_new(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("error: {}", e);
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Interactive prompt to choose the database for a turnkey API project.
+fn prompt_database() -> Option<String> {
+    use std::io::Write;
+    println!("Choose a database for the API:");
+    println!("  1) sqlite    (zero setup, embedded — recommended to start)");
+    println!("  2) postgres");
+    println!("  3) mysql");
+    print!("> ");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).is_err() {
+        return None;
+    }
+    match line.trim() {
+        "1" | "sqlite" | "" => Some("sqlite".to_string()),
+        "2" | "postgres" => Some("postgres".to_string()),
+        "3" | "mysql" => Some("mysql".to_string()),
+        other => {
+            eprintln!("unknown choice `{}` (1/2/3)", other);
+            None
         }
     }
 }
