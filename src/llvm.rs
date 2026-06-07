@@ -2518,7 +2518,7 @@ mod tests {
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["db".to_string()].into_iter().collect();
-        module::normalize(&mut prog, &pkgs);
+        module::normalize(&mut prog, &module::Ns::folders(pkgs));
         let out = generate(&prog).unwrap();
         assert!(out.contains("declare i8* @vader_db_open(i8*)"));
         assert!(out.contains("call i8* @vader_db_open"));
@@ -2543,7 +2543,7 @@ mod tests {
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["http".to_string(), "json".to_string()].into_iter().collect();
-        module::normalize(&mut prog, &pkgs);
+        module::normalize(&mut prog, &module::Ns::folders(pkgs));
         let out = generate(&prog).unwrap();
         assert!(out.contains("call i8* @vader_http_listen"));
         assert!(out.contains("@vader_http_respond"));
@@ -2565,7 +2565,7 @@ mod tests {
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["http".to_string()].into_iter().collect();
-        module::normalize(&mut prog, &pkgs);
+        module::normalize(&mut prog, &module::Ns::folders(pkgs));
         let out = generate(&prog).unwrap();
         assert!(out.contains("call i8* @vader_router_new"));
         assert!(out.contains("bitcast void (i8*)* @h to i8*")); // function as a value
@@ -2587,7 +2587,7 @@ mod tests {
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["strings".to_string(), "math".to_string()].into_iter().collect();
-        module::normalize(&mut prog, &pkgs);
+        module::normalize(&mut prog, &module::Ns::folders(pkgs));
         let out = generate(&prog).unwrap();
         assert!(out.contains("@vader_str_split"));
         assert!(out.contains("@vader_str_join"));
@@ -2616,7 +2616,7 @@ mod tests {
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["mongo".to_string(), "json".to_string()].into_iter().collect();
-        module::normalize(&mut prog, &pkgs);
+        module::normalize(&mut prog, &module::Ns::folders(pkgs));
         let out = generate(&prog).unwrap();
         assert!(out.contains("@vader_mongo_connect"));
         assert!(out.contains("@vader_mongo_insert"));

@@ -533,7 +533,7 @@ fn build_run_source(source: &str, quiet: bool, tls: bool, out: Option<&str>) -> 
             .iter()
             .filter_map(|i| i.rsplit('/').next().map(|s| s.to_string()))
             .collect();
-        module::normalize(&mut program, &packages);
+        module::normalize(&mut program, &module::Ns::folders(packages));
     }
     build_run_program(&program, quiet, tls, out)
 }

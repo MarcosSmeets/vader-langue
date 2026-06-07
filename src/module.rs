@@ -1,12 +1,15 @@
-//! Module system v1: compiles a multi-file project as a single program.
+//! Module system: compiles a multi-file project (plus its dependencies) as one program.
 //!
-//! Strategy: joins all the project's `.vd` files and **normalizes qualified names**
-//! (`domain.User` -> `User`, `usecase.CreateUser{...}` -> `CreateUser{...}`),
-//! treating the project as a flat namespace. The recognized qualifiers are the
-//! folder names + the last segment of the imports. Field access on variables
-//! (`uc.repo`) is NOT affected — only `package.Symbol`.
+//! Two namespacing strategies:
+//! - **Project folders** are flattened: `domain.User` -> `User` (the scaffolds keep
+//!   intra-project names unique, so this is safe and ergonomic).
+//! - **Dependencies are namespaced**: each dep's own symbols are renamed `dep__Symbol`
+//!   (definitions + internal references), and the project's `dep.Symbol` references
+//!   resolve to the same mangled name. So two dependencies — or a dep and the project —
+//!   can define the same `User`/`greet` without colliding.
 //!
-//! Prerequisite: unique type/function names in the project (which the scaffolds guarantee).
+//! Field access on variables (`uc.repo`) is never affected — only `package.Symbol`.
+//! Known limitation: enum *variant* names are not namespaced across deps yet.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,37 +25,53 @@ pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
     if files.is_empty() {
         return Err(format!("no .vd files under `{}`", dir));
     }
-    // `vader.toml` dependencies: fetches them (git clone into the cache) and injects the `.vd` files
-    let mut dep_packages: Vec<String> = Vec::new();
+
+    let mut items = Vec::new();
+    let mut imports = Vec::new();
+
+    // `vader.toml` dependencies: each dependency is its own NAMESPACE. We parse its files,
+    // collect the symbols it defines, and rename them `dep__Symbol` (definitions + internal
+    // references), so two dependencies (or a dep and the project) can share a name safely.
+    let mut dep_packages: HashSet<String> = HashSet::new();
     if let Ok(toml) = std::fs::read_to_string(Path::new(dir).join("vader.toml")) {
         for d in crate::pkg::parse_deps(&toml) {
             let (dep_path, _commit) = crate::pkg::fetch(&d)?;
-            dep_packages.push(d.name.clone());
-            gather(&dep_path, false, &mut files)?;
+            let mut dfiles = Vec::new();
+            gather(&dep_path, false, &mut dfiles)?;
+            dfiles.sort();
+            let mut ditems = Vec::new();
+            for f in &dfiles {
+                let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {}", f.display(), e))?;
+                let tokens = lexer::tokenize(&src).map_err(|e| format!("{}: {}", f.display(), e))?;
+                let prog = parser::parse(tokens).map_err(|e| format!("{}: {}", f.display(), e))?;
+                imports.extend(prog.imports);
+                ditems.extend(prog.items);
+            }
+            let owned = collect_defined(&ditems);
+            for it in &mut ditems {
+                mangle_item(it, &d.name, &owned);
+            }
+            dep_packages.insert(d.name.clone());
+            items.extend(ditems);
         }
     }
 
     files.sort();
 
-    let mut packages: HashSet<String> = HashSet::new();
-    for p in dep_packages {
-        packages.insert(p); // dep name = package for `import`/normalization
-    }
+    // intra-project qualifiers (folder names + the last import segment) are flattened away.
+    let mut folder_packages: HashSet<String> = HashSet::new();
     for f in &files {
         if let Some(parent) = f.parent().and_then(|p| p.file_name()) {
-            packages.insert(parent.to_string_lossy().to_string());
+            folder_packages.insert(parent.to_string_lossy().to_string());
         }
     }
-
-    let mut items = Vec::new();
-    let mut imports = Vec::new();
     for f in &files {
         let src = std::fs::read_to_string(f).map_err(|e| format!("{}: {}", f.display(), e))?;
         let tokens = lexer::tokenize(&src).map_err(|e| format!("{}: {}", f.display(), e))?;
         let prog = parser::parse(tokens).map_err(|e| format!("{}: {}", f.display(), e))?;
         for imp in &prog.imports {
             if let Some(seg) = imp.rsplit('/').next() {
-                packages.insert(seg.to_string());
+                folder_packages.insert(seg.to_string());
             }
         }
         imports.extend(prog.imports);
@@ -61,9 +80,146 @@ pub fn load(dir: &str, include_tests: bool) -> Result<Program, String> {
 
     inject_stdlib(&imports, &mut items);
 
+    let ns = Ns { folder: folder_packages, dep: dep_packages };
     let mut program = Program { imports, items };
-    normalize(&mut program, &packages);
+    normalize(&mut program, &ns);
     Ok(program)
+}
+
+/// Names a set of items defines (top-level functions, structs, enums, interfaces).
+fn collect_defined(items: &[Item]) -> HashSet<String> {
+    let mut s = HashSet::new();
+    for it in items {
+        match it {
+            Item::Function(f) if f.receiver.is_none() => { s.insert(f.name.clone()); }
+            Item::Struct(st) => { s.insert(st.name.clone()); }
+            Item::Enum(e) => { s.insert(e.name.clone()); }
+            Item::Interface(i) => { s.insert(i.name.clone()); }
+            _ => {}
+        }
+    }
+    s
+}
+
+fn mangled(prefix: &str, n: &str) -> String { format!("{}__{}", prefix, n) }
+
+/// Renames a dependency's own symbols (and references to them) to `prefix__Symbol`.
+fn mangle_item(it: &mut Item, prefix: &str, owned: &HashSet<String>) {
+    match it {
+        Item::Function(f) => {
+            if f.receiver.is_none() && owned.contains(&f.name) {
+                f.name = mangled(prefix, &f.name);
+            }
+            if let Some(r) = &mut f.receiver { mangle_type(&mut r.ty, prefix, owned); }
+            for p in &mut f.params { mangle_type(&mut p.ty, prefix, owned); }
+            for t in &mut f.returns { mangle_type(t, prefix, owned); }
+            mangle_block(&mut f.body, prefix, owned);
+        }
+        Item::Struct(s) => {
+            if owned.contains(&s.name) { s.name = mangled(prefix, &s.name); }
+            for fld in &mut s.fields { mangle_type(&mut fld.ty, prefix, owned); }
+        }
+        Item::Enum(e) => {
+            if owned.contains(&e.name) { e.name = mangled(prefix, &e.name); }
+            for v in &mut e.variants {
+                for fld in &mut v.fields { mangle_type(&mut fld.ty, prefix, owned); }
+            }
+        }
+        Item::Interface(i) => {
+            if owned.contains(&i.name) { i.name = mangled(prefix, &i.name); }
+            for m in &mut i.methods {
+                for p in &mut m.params { mangle_type(&mut p.ty, prefix, owned); }
+                for t in &mut m.returns { mangle_type(t, prefix, owned); }
+            }
+        }
+        Item::Test(t) => mangle_block(&mut t.body, prefix, owned),
+    }
+}
+
+fn mangle_type(t: &mut Type, prefix: &str, owned: &HashSet<String>) {
+    match t {
+        Type::Named(n) => { if owned.contains(n) { *n = mangled(prefix, n); } }
+        Type::Slice(inner) => mangle_type(inner, prefix, owned),
+        Type::Generic(name, args) => {
+            if owned.contains(name) { *name = mangled(prefix, name); }
+            for a in args { mangle_type(a, prefix, owned); }
+        }
+    }
+}
+
+fn mangle_block(b: &mut Block, prefix: &str, owned: &HashSet<String>) {
+    for s in &mut b.stmts { mangle_stmt(s, prefix, owned); }
+}
+
+fn mangle_stmt(s: &mut Stmt, prefix: &str, owned: &HashSet<String>) {
+    match s {
+        Stmt::VarDecl { decls, values, .. } => {
+            for d in decls { mangle_type(&mut d.ty, prefix, owned); }
+            for v in values { mangle_expr(v, prefix, owned); }
+        }
+        Stmt::Assign { target, value } => {
+            mangle_expr(target, prefix, owned);
+            mangle_expr(value, prefix, owned);
+        }
+        Stmt::Return(vs) => { for v in vs { mangle_expr(v, prefix, owned); } }
+        Stmt::If { cond, then_block, else_block } => {
+            mangle_expr(cond, prefix, owned);
+            mangle_block(then_block, prefix, owned);
+            if let Some(eb) = else_block { mangle_block(eb, prefix, owned); }
+        }
+        Stmt::For { head, body } => {
+            match head {
+                ForHead::While(c) => mangle_expr(c, prefix, owned),
+                ForHead::In { iter, .. } => mangle_expr(iter, prefix, owned),
+                ForHead::Infinite => {}
+            }
+            mangle_block(body, prefix, owned);
+        }
+        Stmt::Spawn(c) => mangle_expr(c, prefix, owned),
+        Stmt::Send { chan, value } => {
+            mangle_expr(chan, prefix, owned);
+            mangle_expr(value, prefix, owned);
+        }
+        Stmt::Assert(e) => mangle_expr(e, prefix, owned),
+        Stmt::Expr(e) => mangle_expr(e, prefix, owned),
+    }
+}
+
+fn mangle_expr(e: &mut Expr, prefix: &str, owned: &HashSet<String>) {
+    match &mut e.kind {
+        ExprKind::Ident(n) => { if owned.contains(n) { *n = mangled(prefix, n); } }
+        ExprKind::Unary { expr, .. } => mangle_expr(expr, prefix, owned),
+        ExprKind::Binary { left, right, .. } => {
+            mangle_expr(left, prefix, owned);
+            mangle_expr(right, prefix, owned);
+        }
+        ExprKind::Call { callee, args } => {
+            mangle_expr(callee, prefix, owned);
+            for a in args { mangle_expr(a, prefix, owned); }
+        }
+        ExprKind::Field { base, .. } => mangle_expr(base, prefix, owned),
+        ExprKind::Index { base, index } => {
+            mangle_expr(base, prefix, owned);
+            mangle_expr(index, prefix, owned);
+        }
+        ExprKind::StructLit { name, fields } => {
+            if owned.contains(name) { *name = mangled(prefix, name); }
+            for (_, fe) in fields { mangle_expr(fe, prefix, owned); }
+        }
+        ExprKind::SliceLit(elems) => { for el in elems { mangle_expr(el, prefix, owned); } }
+        ExprKind::Recv(inner) => mangle_expr(inner, prefix, owned),
+        ExprKind::Match { scrutinee, arms } => {
+            mangle_expr(scrutinee, prefix, owned);
+            for arm in arms {
+                if let Some(g) = &mut arm.guard { mangle_expr(g, prefix, owned); }
+                match &mut arm.body {
+                    MatchArmBody::Expr(ex) => mangle_expr(ex, prefix, owned),
+                    MatchArmBody::Block(b) => mangle_block(b, prefix, owned),
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Minimal stdlib: injects the types of the `std/...` packages the project imports,
@@ -103,100 +259,117 @@ fn gather(dir: &Path, include_tests: bool, out: &mut Vec<PathBuf>) -> Result<(),
     Ok(())
 }
 
-fn strip(name: &str, packages: &HashSet<String>) -> Option<String> {
-    let (pkg, rest) = name.split_once('.')?;
-    if packages.contains(pkg) {
-        Some(rest.to_string())
-    } else {
-        None
+/// Namespace resolution: project folders are flattened (`domain.User` -> `User`),
+/// dependencies are mangled (`greeter.Hello` -> `greeter__Hello`) so names never collide.
+pub struct Ns {
+    pub folder: HashSet<String>,
+    pub dep: HashSet<String>,
+}
+impl Ns {
+    pub fn folders(folder: HashSet<String>) -> Ns {
+        Ns { folder, dep: HashSet::new() }
+    }
+    /// Resolves a possibly-qualified `pkg.rest` name.
+    fn resolve(&self, name: &str) -> Option<String> {
+        let (pkg, rest) = name.split_once('.')?;
+        self.rewrite(pkg, rest)
+    }
+    fn rewrite(&self, pkg: &str, rest: &str) -> Option<String> {
+        if self.dep.contains(pkg) {
+            Some(format!("{}__{}", pkg, rest))
+        } else if self.folder.contains(pkg) {
+            Some(rest.to_string())
+        } else {
+            None
+        }
     }
 }
 
-/// Removes the package qualifiers from the entire AST.
-pub fn normalize(program: &mut Program, packages: &HashSet<String>) {
+/// Resolves package qualifiers across the AST (strip folders, mangle deps).
+pub fn normalize(program: &mut Program, ns: &Ns) {
     for item in &mut program.items {
         match item {
             Item::Function(f) => {
                 if let Some(r) = &mut f.receiver {
-                    normalize_type(&mut r.ty, packages);
+                    normalize_type(&mut r.ty, ns);
                 }
                 for p in &mut f.params {
-                    normalize_type(&mut p.ty, packages);
+                    normalize_type(&mut p.ty, ns);
                 }
                 for t in &mut f.returns {
-                    normalize_type(t, packages);
+                    normalize_type(t, ns);
                 }
-                normalize_block(&mut f.body, packages);
+                normalize_block(&mut f.body, ns);
             }
             Item::Struct(s) => {
                 for fld in &mut s.fields {
-                    normalize_type(&mut fld.ty, packages);
+                    normalize_type(&mut fld.ty, ns);
                 }
             }
             Item::Interface(it) => {
                 for m in &mut it.methods {
                     for p in &mut m.params {
-                        normalize_type(&mut p.ty, packages);
+                        normalize_type(&mut p.ty, ns);
                     }
                     for t in &mut m.returns {
-                        normalize_type(t, packages);
+                        normalize_type(t, ns);
                     }
                 }
             }
             Item::Enum(e) => {
                 for v in &mut e.variants {
                     for fld in &mut v.fields {
-                        normalize_type(&mut fld.ty, packages);
+                        normalize_type(&mut fld.ty, ns);
                     }
                 }
             }
-            Item::Test(t) => normalize_block(&mut t.body, packages),
+            Item::Test(t) => normalize_block(&mut t.body, ns),
         }
     }
 }
 
-fn normalize_type(t: &mut Type, packages: &HashSet<String>) {
+fn normalize_type(t: &mut Type, ns: &Ns) {
     match t {
         Type::Named(n) => {
-            if let Some(s) = strip(n, packages) {
+            if let Some(s) = ns.resolve(n) {
                 *n = s;
             }
         }
-        Type::Slice(inner) => normalize_type(inner, packages),
+        Type::Slice(inner) => normalize_type(inner, ns),
         Type::Generic(name, args) => {
-            if let Some(s) = strip(name, packages) {
+            if let Some(s) = ns.resolve(name) {
                 *name = s;
             }
             for a in args {
-                normalize_type(a, packages);
+                normalize_type(a, ns);
             }
         }
     }
 }
 
-fn normalize_block(b: &mut Block, packages: &HashSet<String>) {
+fn normalize_block(b: &mut Block, ns: &Ns) {
     for s in &mut b.stmts {
-        normalize_stmt(s, packages);
+        normalize_stmt(s, ns);
     }
 }
 
-fn normalize_stmt(s: &mut Stmt, packages: &HashSet<String>) {
+fn normalize_stmt(s: &mut Stmt, ns: &Ns) {
     match s {
         Stmt::VarDecl { decls, values, .. } => {
             for d in decls {
-                normalize_type(&mut d.ty, packages);
+                normalize_type(&mut d.ty, ns);
             }
             for v in values {
-                normalize_expr(v, packages);
+                normalize_expr(v, ns);
             }
         }
         Stmt::Assign { target, value } => {
-            normalize_expr(target, packages);
-            normalize_expr(value, packages);
+            normalize_expr(target, ns);
+            normalize_expr(value, ns);
         }
         Stmt::Return(vs) => {
             for v in vs {
-                normalize_expr(v, packages);
+                normalize_expr(v, ns);
             }
         }
         Stmt::If {
@@ -204,35 +377,35 @@ fn normalize_stmt(s: &mut Stmt, packages: &HashSet<String>) {
             then_block,
             else_block,
         } => {
-            normalize_expr(cond, packages);
-            normalize_block(then_block, packages);
+            normalize_expr(cond, ns);
+            normalize_block(then_block, ns);
             if let Some(eb) = else_block {
-                normalize_block(eb, packages);
+                normalize_block(eb, ns);
             }
         }
         Stmt::For { head, body } => {
             match head {
-                ForHead::While(c) => normalize_expr(c, packages),
-                ForHead::In { iter, .. } => normalize_expr(iter, packages),
+                ForHead::While(c) => normalize_expr(c, ns),
+                ForHead::In { iter, .. } => normalize_expr(iter, ns),
                 ForHead::Infinite => {}
             }
-            normalize_block(body, packages);
+            normalize_block(body, ns);
         }
-        Stmt::Spawn(c) => normalize_expr(c, packages),
+        Stmt::Spawn(c) => normalize_expr(c, ns),
         Stmt::Send { chan, value } => {
-            normalize_expr(chan, packages);
-            normalize_expr(value, packages);
+            normalize_expr(chan, ns);
+            normalize_expr(value, ns);
         }
-        Stmt::Assert(e) => normalize_expr(e, packages),
-        Stmt::Expr(e) => normalize_expr(e, packages),
+        Stmt::Assert(e) => normalize_expr(e, ns),
+        Stmt::Expr(e) => normalize_expr(e, ns),
     }
 }
 
-fn normalize_expr(e: &mut Expr, packages: &HashSet<String>) {
+fn normalize_expr(e: &mut Expr, ns: &Ns) {
     // `package.symbol` (Field whose base is a package Ident) -> `symbol`
     let replacement = if let ExprKind::Field { base, field } = &e.kind {
         match &base.kind {
-            ExprKind::Ident(p) if packages.contains(p) => Some(field.clone()),
+            ExprKind::Ident(p) => ns.rewrite(p, field),
             _ => None,
         }
     } else {
@@ -244,45 +417,45 @@ fn normalize_expr(e: &mut Expr, packages: &HashSet<String>) {
     }
 
     match &mut e.kind {
-        ExprKind::Unary { expr, .. } => normalize_expr(expr, packages),
+        ExprKind::Unary { expr, .. } => normalize_expr(expr, ns),
         ExprKind::Binary { left, right, .. } => {
-            normalize_expr(left, packages);
-            normalize_expr(right, packages);
+            normalize_expr(left, ns);
+            normalize_expr(right, ns);
         }
         ExprKind::Call { callee, args } => {
-            normalize_expr(callee, packages);
+            normalize_expr(callee, ns);
             for a in args {
-                normalize_expr(a, packages);
+                normalize_expr(a, ns);
             }
         }
-        ExprKind::Field { base, .. } => normalize_expr(base, packages),
+        ExprKind::Field { base, .. } => normalize_expr(base, ns),
         ExprKind::Index { base, index } => {
-            normalize_expr(base, packages);
-            normalize_expr(index, packages);
+            normalize_expr(base, ns);
+            normalize_expr(index, ns);
         }
         ExprKind::StructLit { name, fields } => {
-            if let Some(s) = strip(name, packages) {
+            if let Some(s) = ns.resolve(name) {
                 *name = s;
             }
             for (_, fe) in fields {
-                normalize_expr(fe, packages);
+                normalize_expr(fe, ns);
             }
         }
         ExprKind::SliceLit(elems) => {
             for el in elems {
-                normalize_expr(el, packages);
+                normalize_expr(el, ns);
             }
         }
-        ExprKind::Recv(inner) => normalize_expr(inner, packages),
+        ExprKind::Recv(inner) => normalize_expr(inner, ns),
         ExprKind::Match { scrutinee, arms } => {
-            normalize_expr(scrutinee, packages);
+            normalize_expr(scrutinee, ns);
             for arm in arms {
                 if let Some(g) = &mut arm.guard {
-                    normalize_expr(g, packages);
+                    normalize_expr(g, ns);
                 }
                 match &mut arm.body {
-                    MatchArmBody::Expr(ex) => normalize_expr(ex, packages),
-                    MatchArmBody::Block(b) => normalize_block(b, packages),
+                    MatchArmBody::Expr(ex) => normalize_expr(ex, ns),
+                    MatchArmBody::Block(b) => normalize_block(b, ns),
                 }
             }
         }
@@ -307,7 +480,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        normalize(&mut prog, &packages(&["domain"]));
+        normalize(&mut prog, &Ns::folders(packages(&["domain"])));
         let dump = format!("{:?}", prog);
         assert!(!dump.contains("domain."), "qualifier left over: {}", dump);
         assert!(dump.contains("\"User\""));
@@ -321,10 +494,36 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        normalize(&mut prog, &packages(&["src"]));
+        normalize(&mut prog, &Ns::folders(packages(&["src"])));
         let dump = format!("{:?}", prog);
         assert!(!dump.contains("\"src\""), "src should have been removed: {}", dump);
         // the field access on `u` (variable) must remain
         assert!(dump.contains("Field"));
+    }
+
+    #[test]
+    fn dependency_symbols_are_namespaced() {
+        // A dependency's own symbols are mangled `dep__Name`, and the project's
+        // qualified references resolve to the same mangled name.
+        let mut dep = parser::parse(
+            lexer::tokenize("public fn Hello(): string {\n    return greet()\n}\nfn greet(): string {\n    return \"hi\"\n}")
+                .unwrap(),
+        )
+        .unwrap();
+        let owned = collect_defined(&dep.items);
+        for it in &mut dep.items {
+            mangle_item(it, "greeter", &owned);
+        }
+        let dump = format!("{:?}", dep.items);
+        assert!(dump.contains("greeter__Hello"), "dep fn not mangled: {}", dump);
+        assert!(dump.contains("greeter__greet"), "internal call not mangled: {}", dump);
+
+        // project reference `greeter.Hello()` resolves to greeter__Hello
+        let mut proj =
+            parser::parse(lexer::tokenize("fn main() {\n    print(greeter.Hello())\n}").unwrap()).unwrap();
+        let ns = Ns { folder: HashSet::new(), dep: packages(&["greeter"]) };
+        normalize(&mut proj, &ns);
+        let pd = format!("{:?}", proj);
+        assert!(pd.contains("greeter__Hello"), "project ref not resolved: {}", pd);
     }
 }
