@@ -669,6 +669,11 @@ impl Checker {
     }
 
     fn check_var_decl(&mut self, decls: &[Param], values: &[Expr]) {
+        // anchor errors (e.g. an unknown declared type) to the statement's line.
+        if let Some(v) = values.first() {
+            self.cur_line = v.line;
+            self.cur_col = v.col;
+        }
         let decl_tys: Vec<Ty> = decls.iter().map(|d| self.resolve(&d.ty)).collect();
 
         if decls.len() == values.len() {
