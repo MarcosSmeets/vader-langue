@@ -155,7 +155,14 @@ to LLVM touches only the last box.
 - [x] **TLS for Postgres** (`vader llvm --tls`) — SSLRequest + OpenSSL under `#ifdef VADER_TLS`,
       opt-in (no libssl for those who don't use it). Code compiles against the OpenSSL API; real
       linking needs `libssl-dev` + a TLS server to verify. v1 without certificate verification.
-- [ ] MD5 auth (legacy) + MySQL 8 caching_sha2 + Mongo driver — next phase
+- [ ] MD5 auth (legacy) + MySQL 8 caching_sha2 — next phase
+- [ ] **Mongo driver** — deliberately deferred: unlike PG/MySQL it does NOT fit the SQL
+      `std/db` API. It needs (1) a BSON encoder/decoder (binary JSON, reusing the `vader_json`
+      value tree), (2) the OP_MSG wire protocol, (3) SCRAM-SHA-1 auth (the SHA-1 from the MySQL
+      driver is reusable), and (4) a **document API** — e.g. `mongo.insert(conn, "users", doc)` /
+      `mongo.find(conn, "users", query): docs` — not `exec`/`query`. It also needs a running
+      MongoDB to verify (best via local Docker). Shipping it unverified would be irresponsible;
+      it's a focused next effort, ideally with a local Mongo for the round-trip.
 - [x] **Real execution of migrations** — `vader migrate up/down [--db <dsn>]` (or `[database] url`
       in vader.toml) runs the SQL against the database via `std/db` (`db.must` aborts on failure; only marks
       applied on success). **Verified against SQLite** (up creates+seeds, down reverts).
