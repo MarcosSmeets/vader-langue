@@ -1,12 +1,14 @@
 /* Vader runtime MySQL/MariaDB client (native protocol) — self-contained.
  *
- * TCP + handshake v10 + `mysql_native_password` auth (SHA-1) + COM_QUERY +
- * result set parsing (text). No libmysqlclient, no TLS (v1).
+ * TCP + handshake v10 + COM_QUERY + result set parsing (text). No libmysqlclient.
  *
- * MySQL 8 uses `caching_sha2_password` by default (not supported in v1 without TLS/RSA):
- * create the user with `IDENTIFIED WITH mysql_native_password`.
+ * Auth: `mysql_native_password` (SHA-1) and `caching_sha2_password` (MySQL 8 default,
+ * SHA-256 scramble). The caching_sha2 fast path needs no extra crypto; full auth (cold
+ * cache) sends the RSA-encrypted password using the server's public key, which requires
+ * OpenSSL — available only when built with `--tls`. Without it, only the fast path
+ * (cached credential) works for caching_sha2.
  *
- * Includes its own SHA-1 (public domain). No GC: buffers leak. */
+ * Includes its own SHA-1 (public domain); SHA-256 comes from vader_scram.c. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +16,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+
+#ifdef VADER_TLS
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/bio.h>
+#endif
+
+/* SHA-256 (vader_scram.c) for the caching_sha2_password scramble */
+extern void vader_scram_sha256(const unsigned char *, int, unsigned char[32]);
 
 /* ===================== SHA-1 (public domain) ============================== */
 typedef struct {
@@ -172,6 +183,32 @@ static void native_scramble(const char *pass, const unsigned char *salt, unsigne
     for (int i = 0; i < 20; i++) out[i] = h1[i] ^ h3[i];
 }
 
+/* caching_sha2_password scramble: SHA256(pwd) XOR SHA256(SHA256(SHA256(pwd)) + salt) */
+static void caching_sha2_scramble(const char *pass, const unsigned char *salt, unsigned char out[32]) {
+    unsigned char h1[32], h2[32], h3[32], cat[52];
+    vader_scram_sha256((const unsigned char *)pass, strlen(pass), h1);
+    vader_scram_sha256(h1, 32, h2);
+    memcpy(cat, h2, 32);
+    memcpy(cat + 32, salt, 20);
+    vader_scram_sha256(cat, 52, h3);
+    for (int i = 0; i < 32; i++) out[i] = h1[i] ^ h3[i];
+}
+
+#ifdef VADER_TLS
+/* RSA-OAEP encrypt `in` with the server's PEM public key; returns ciphertext length. */
+static int rsa_oaep_encrypt(const char *pem, int pemlen, const unsigned char *in, int inlen,
+                            unsigned char *out) {
+    BIO *bio = BIO_new_mem_buf(pem, pemlen);
+    if (!bio) return -1;
+    RSA *rsa = PEM_read_bio_RSA_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    if (!rsa) return -1;
+    int n = RSA_public_encrypt(inlen, in, out, rsa, RSA_PKCS1_OAEP_PADDING);
+    RSA_free(rsa);
+    return n;
+}
+#endif
+
 MyConn *vader_my_connect(const char *dsn) {
     char user[128], pass[128], host[128], db[128];
     int port;
@@ -210,10 +247,20 @@ MyConn *vader_my_connect(const char *dsn) {
     i += 2;         /* caps high */
     int authlen = pkt[i]; i += 1;
     i += 10;        /* reserved */
-    int salt2 = authlen > 8 ? authlen - 8 : 12;
-    if (salt2 > 12) salt2 = 12;
-    memcpy(salt + 8, pkt + i, salt2 < 12 ? salt2 : 12);
+    int part2 = authlen > 8 ? authlen - 8 : 13;  /* auth-plugin-data-part-2 (>= 13) */
+    if (part2 < 13) part2 = 13;
+    int saltc = part2 - 1;
+    if (saltc > 12) saltc = 12;
+    memcpy(salt + 8, pkt + i, saltc);
+    i += part2;
+    char plugin[64] = "mysql_native_password";
+    if (i < len && pkt[i]) {
+        int pj = 0;
+        while (i < len && pkt[i] && pj < 63) plugin[pj++] = pkt[i++];
+        plugin[pj] = 0;
+    }
     free(pkt);
+    int use_sha2 = (strcmp(plugin, "caching_sha2_password") == 0);
 
     /* handshake response (protocol 41) */
     unsigned int caps = 0x1 | 0x200 | 0x2000 | 0x8000 | 0x80000 | 0x8; /* +CONNECT_WITH_DB */
@@ -226,31 +273,81 @@ MyConn *vader_my_connect(const char *dsn) {
     resp[o++] = 33;                                            /* charset utf8 */
     memset(resp + o, 0, 23); o += 23;
     o += sprintf((char *)resp + o, "%s", user) + 1;
-    unsigned char scr[20];
     if (pass[0]) {
-        native_scramble(pass, salt, scr);
-        resp[o++] = 20;
-        memcpy(resp + o, scr, 20); o += 20;
+        unsigned char scr[32];
+        if (use_sha2) { caching_sha2_scramble(pass, salt, scr); resp[o++] = 32; memcpy(resp + o, scr, 32); o += 32; }
+        else { native_scramble(pass, salt, scr); resp[o++] = 20; memcpy(resp + o, scr, 20); o += 20; }
     } else {
         resp[o++] = 0;
     }
     if (db[0]) o += sprintf((char *)resp + o, "%s", db) + 1;
-    o += sprintf((char *)resp + o, "mysql_native_password") + 1;
+    o += sprintf((char *)resp + o, "%s", use_sha2 ? "caching_sha2_password" : "mysql_native_password") + 1;
     my_write_packet(fd, resp, o, 1);
 
-    /* server response: OK(0x00) / ERR(0xff) / AuthSwitch(0xfe) */
-    pkt = my_read_packet(fd, &len, &seq);
-    if (!pkt) { c->fd = -1; return c; }
-    if (pkt[0] == 0xff) {
-        snprintf(c->err, sizeof(c->err), "auth refused (use mysql_native_password)");
-        free(pkt); c->fd = -1; return c;
+    /* auth result loop: OK / ERR / AuthSwitch(0xfe) / AuthMoreData(0x01, caching_sha2) */
+    for (;;) {
+        pkt = my_read_packet(fd, &len, &seq);
+        if (!pkt) { c->fd = -1; if (!c->err[0]) snprintf(c->err, sizeof c->err, "no auth reply"); return c; }
+        int rseq = seq + 1;
+        unsigned char tag = pkt[0];
+        if (tag == 0x00) { free(pkt); return c; }  /* OK packet */
+        if (tag == 0xff) {
+            int ecode = pkt[1] | (pkt[2] << 8);
+            snprintf(c->err, sizeof(c->err), "auth failed (mysql error %d)", ecode);
+            free(pkt); c->fd = -1; return c;
+        }
+        if (tag == 0xfe) {  /* AuthSwitchRequest: plugin\0 + salt */
+            char sw[64]; int sj = 0, k = 1;
+            while (k < len && pkt[k] && sj < 63) sw[sj++] = pkt[k++];
+            sw[sj] = 0; k++;
+            unsigned char nsalt[20];
+            int avail = len - k; if (avail > 20) avail = 20; if (avail < 0) avail = 0;
+            memcpy(nsalt, pkt + k, avail);
+            free(pkt);
+            memcpy(salt, nsalt, 20);
+            use_sha2 = (strcmp(sw, "caching_sha2_password") == 0);
+            unsigned char sc[32]; int sl;
+            if (use_sha2) { caching_sha2_scramble(pass, salt, sc); sl = 32; }
+            else { native_scramble(pass, salt, sc); sl = 20; }
+            my_write_packet(fd, sc, sl, rseq);
+            continue;
+        }
+        if (tag == 0x01) {  /* AuthMoreData (caching_sha2) */
+            unsigned char st = pkt[1];
+            free(pkt);
+            if (st == 0x03) continue;  /* fast auth success -> OK follows */
+            if (st == 0x04) {          /* full auth required */
+#ifdef VADER_TLS
+                unsigned char req = 0x02;  /* request the server's RSA public key */
+                my_write_packet(fd, &req, 1, rseq);
+                pkt = my_read_packet(fd, &len, &seq);
+                if (!pkt) { c->fd = -1; return c; }
+                rseq = seq + 1;
+                const char *pem = (const char *)(pkt + 1);  /* 0x01 + PEM */
+                int pemlen = len - 1;
+                int plen = (int)strlen(pass) + 1;           /* include trailing NUL */
+                unsigned char xored[256];
+                for (int z = 0; z < plen && z < 256; z++)
+                    xored[z] = (unsigned char)(z < plen - 1 ? pass[z] : 0) ^ salt[z % 20];
+                unsigned char enc[512];
+                int enclen = rsa_oaep_encrypt(pem, pemlen, xored, plen, enc);
+                free(pkt);
+                if (enclen <= 0) { snprintf(c->err, sizeof c->err, "RSA encrypt failed"); c->fd = -1; return c; }
+                my_write_packet(fd, enc, enclen, rseq);
+                continue;
+#else
+                snprintf(c->err, sizeof(c->err),
+                         "caching_sha2 full auth needs --tls (or a cached credential)");
+                c->fd = -1; return c;
+#endif
+            }
+            snprintf(c->err, sizeof(c->err), "unexpected auth data 0x%02x", st);
+            c->fd = -1; return c;
+        }
+        free(pkt);
+        snprintf(c->err, sizeof(c->err), "unexpected auth packet 0x%02x", tag);
+        c->fd = -1; return c;
     }
-    if (pkt[0] == 0xfe) {
-        snprintf(c->err, sizeof(c->err), "server requested plugin switch (use mysql_native_password)");
-        free(pkt); c->fd = -1; return c;
-    }
-    free(pkt);
-    return c;
 }
 
 const char *vader_my_error(MyConn *c) {

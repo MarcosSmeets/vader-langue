@@ -1,5 +1,6 @@
 // MySQL/MariaDB over the network — same API, mysql:// DSN.
-// Requires a running MySQL and a user with `IDENTIFIED WITH mysql_native_password`.
+// Works with mysql_native_password and MySQL 8 caching_sha2_password (the default).
+// For a cold caching_sha2 cache, build with `--tls` so the password can be RSA-encrypted.
 import "std/db"
 
 public fn main() {

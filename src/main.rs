@@ -627,11 +627,12 @@ fn build_run_program(
         }
         cmd.arg(&obj); // cached sqlite3.o
         cmd.arg(cached_obj(&dir, "vader_db", VADER_DB_C, &[], quiet)?);
-        let pg_args: &[&str] = if tls { &["-DVADER_TLS"] } else { &[] };
-        cmd.arg(cached_obj(&dir, "vader_pg", VADER_PG_C, pg_args, quiet)?);
-        cmd.arg(cached_obj(&dir, "vader_mysql", VADER_MYSQL_C, &[], quiet)?);
+        let tls_args: &[&str] = if tls { &["-DVADER_TLS"] } else { &[] };
+        cmd.arg(cached_obj(&dir, "vader_pg", VADER_PG_C, tls_args, quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_mysql", VADER_MYSQL_C, tls_args, quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_scram", VADER_SCRAM_C, &[], quiet)?); // SHA-256 for caching_sha2
         if tls {
-            cmd.arg("-lssl").arg("-lcrypto"); // TLS for Postgres (cloud)
+            cmd.arg("-lssl").arg("-lcrypto"); // TLS (Postgres) + RSA (MySQL caching_sha2 full auth)
         }
         cmd.arg("-lpthread").arg("-ldl").arg("-lm");
     }

@@ -155,7 +155,13 @@ to LLVM touches only the last box.
 - [x] **TLS for Postgres** (`vader llvm --tls`) — SSLRequest + OpenSSL under `#ifdef VADER_TLS`,
       opt-in (no libssl for those who don't use it). Code compiles against the OpenSSL API; real
       linking needs `libssl-dev` + a TLS server to verify. v1 without certificate verification.
-- [ ] MD5 auth (legacy) + MySQL 8 caching_sha2 — next phase
+- [x] **MySQL 8 `caching_sha2_password`** — the default MySQL 8 auth. SHA-256 scramble
+      (fast path) + the full-auth path that RSA-encrypts the password with the server's public
+      key (OpenSSL, so the cold-cache first connect needs a `--tls` build). The scramble crypto
+      matches a reference vector; the rewritten auth flow is live-verified against MySQL 8.4
+      (auth handshake + AuthSwitch + result loop). The RSA full-auth path compiles under
+      `--tls`; live-verifying it needs `libssl-dev`.
+- [ ] MD5 auth (legacy Postgres) + the MySQL caching_sha2 full-auth live test — next phase
 - [x] **Mongo driver** (`std/mongo`) — a document API (not SQL): `mongo.connect(dsn)`,
       `mongo.insert(m, coll, doc)`, `mongo.find(m, coll, query): docs`, `mongo.close(m)`.
       Own BSON encoder/decoder (reusing the `vader_json` value tree) + the OP_MSG wire protocol
