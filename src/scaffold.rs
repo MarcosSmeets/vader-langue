@@ -100,13 +100,97 @@ fn db_dsn_example(db: &str, name: &str) -> String {
     match db {
         "postgres" => format!("postgres://postgres:password@localhost:5432/{name}"),
         "mysql" => format!("mysql://root:password@localhost:3306/{name}"),
+        "mongo" => format!("mongodb://localhost:27017/{name}"),
         _ => format!("./{name}.db"),
     }
 }
 
 fn api_tdd_files(name: &str, db: &str) -> Vec<(String, String)> {
-    let create_sql = db_create_sql(db);
     let dsn = db_dsn_example(db, name);
+    let is_mongo = db == "mongo";
+
+    // cmd/main.vd: Mongo is schemaless (no CREATE TABLE); SQL creates the table on boot.
+    let main_vd = if is_mongo {
+        "import \"std/http\"\n\n\
+         // Entry point: wire the routes and start the server.\n\
+         public fn main() {\n    \
+             Router r = newRouter()\n    \
+             r.get(\"/health\", health)      // default health-check route\n    \
+             r.get(\"/users\", listUsers)\n    \
+             r.post(\"/users\", createUser)\n\n    \
+             print(\"listening on http://localhost:8080\")\n    \
+             serve(8080, r)\n\
+         }\n"
+            .to_string()
+    } else {
+        let create_sql = db_create_sql(db);
+        format!(
+            "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\n\n\
+             // Entry point: wire the routes and start the server.\n\
+             public fn main() {{\n    \
+                 // The DB connection string comes from the environment — just set DATABASE_URL.\n    \
+                 DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+                 db.must(conn, \"{create_sql}\")\n    \
+                 db.close(conn)\n\n    \
+                 Router r = newRouter()\n    \
+                 r.get(\"/health\", health)      // default health-check route\n    \
+                 r.get(\"/users\", listUsers)\n    \
+                 r.post(\"/users\", createUser)\n\n    \
+                 print(\"listening on http://localhost:8080\")\n    \
+                 serve(8080, r)\n\
+             }}\n",
+        )
+    };
+
+    let users_vd = if is_mongo {
+        "import \"std/http\"\nimport \"std/mongo\"\nimport \"std/env\"\nimport \"std/json\"\n\n\
+         public fn listUsers(s Server) {\n    \
+             Mongo m = mongo.connect(env.read(\"DATABASE_URL\"))\n    \
+             Json users = mongo.find(m, \"users\", json.object())\n    \
+             http.respond(s, 200, \"application/json\", json.encode(users))\n    \
+             mongo.close(m)\n\
+         }\n\n\
+         public fn createUser(s Server) {\n    \
+             Mongo m = mongo.connect(env.read(\"DATABASE_URL\"))\n    \
+             Json body = json.parse(http.body(s))\n    \
+             error e = mongo.insert(m, \"users\", body)\n    \
+             if e != nil {\n        \
+                 http.respond(s, 500, \"application/json\", \"{\\\"error\\\":\\\"insert failed\\\"}\")\n    \
+             } else {\n        \
+                 http.respond(s, 201, \"application/json\", \"{\\\"status\\\":\\\"created\\\"}\")\n    \
+             }\n    \
+             mongo.close(m)\n\
+         }\n"
+            .to_string()
+    } else {
+        "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\nimport \"std/json\"\n\n\
+         public fn listUsers(s Server) {\n    \
+             DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+             Rows rows = db.query(conn, \"SELECT id, name FROM users ORDER BY id\")\n    \
+             Json arr = json.array()\n    \
+             for db.next(rows) {\n        \
+                 Json u = json.object()\n        \
+                 json.set_int(u, \"id\", db.col_int(rows, 0))\n        \
+                 json.set_str(u, \"name\", db.col_text(rows, 1))\n        \
+                 json.add(arr, u)\n    \
+             }\n    \
+             http.respond(s, 200, \"application/json\", json.encode(arr))\n    \
+             db.close(conn)\n\
+         }\n\n\
+         public fn createUser(s Server) {\n    \
+             DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
+             Json body = json.parse(http.body(s))\n    \
+             string name = json.as_str(json.field(body, \"name\"))\n    \
+             // parameterized query — `?` placeholders, no string concatenation.\n    \
+             Stmt st = db.prepare(conn, \"INSERT INTO users (name) VALUES (?)\")\n    \
+             db.bind_str(st, name)\n    \
+             db.run(st)\n    \
+             http.respond(s, 201, \"application/json\", \"{\\\"status\\\":\\\"created\\\"}\")\n    \
+             db.close(conn)\n\
+         }\n"
+            .to_string()
+    };
+
     vec![
         f(
             "vader.toml",
@@ -120,25 +204,7 @@ fn api_tdd_files(name: &str, db: &str) -> Vec<(String, String)> {
             ".env.example",
             format!("# copy to .env and adjust; the app reads DATABASE_URL at startup\nDATABASE_URL={dsn}\n"),
         ),
-        f(
-            "cmd/main.vd",
-            format!(
-                "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\n\n\
-                 // Entry point: wire the routes and start the server.\n\
-                 public fn main() {{\n    \
-                     // The DB connection string comes from the environment — just set DATABASE_URL.\n    \
-                     DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
-                     db.must(conn, \"{create_sql}\")\n    \
-                     db.close(conn)\n\n    \
-                     Router r = newRouter()\n    \
-                     r.get(\"/health\", health)      // default health-check route\n    \
-                     r.get(\"/users\", listUsers)\n    \
-                     r.post(\"/users\", createUser)\n\n    \
-                     print(\"listening on http://localhost:8080\")\n    \
-                     serve(8080, r)\n\
-                 }}\n",
-            ),
-        ),
+        f("cmd/main.vd", main_vd),
         f(
             "handlers/health.vd",
             "import \"std/http\"\n\n\
@@ -148,35 +214,7 @@ fn api_tdd_files(name: &str, db: &str) -> Vec<(String, String)> {
              }\n"
                 .to_string(),
         ),
-        f(
-            "handlers/users.vd",
-            "import \"std/http\"\nimport \"std/db\"\nimport \"std/env\"\nimport \"std/json\"\n\n\
-             public fn listUsers(s Server) {\n    \
-                 DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
-                 Rows rows = db.query(conn, \"SELECT id, name FROM users ORDER BY id\")\n    \
-                 Json arr = json.array()\n    \
-                 for db.next(rows) {\n        \
-                     Json u = json.object()\n        \
-                     json.set_int(u, \"id\", db.col_int(rows, 0))\n        \
-                     json.set_str(u, \"name\", db.col_text(rows, 1))\n        \
-                     json.add(arr, u)\n    \
-                 }\n    \
-                 http.respond(s, 200, \"application/json\", json.encode(arr))\n    \
-                 db.close(conn)\n\
-             }\n\n\
-             public fn createUser(s Server) {\n    \
-                 DB conn = db.open(env.read(\"DATABASE_URL\"))\n    \
-                 Json body = json.parse(http.body(s))\n    \
-                 string name = json.as_str(json.field(body, \"name\"))\n    \
-                 // parameterized query — `?` placeholders, no string concatenation.\n    \
-                 Stmt st = db.prepare(conn, \"INSERT INTO users (name) VALUES (?)\")\n    \
-                 db.bind_str(st, name)\n    \
-                 db.run(st)\n    \
-                 http.respond(s, 201, \"application/json\", \"{\\\"status\\\":\\\"created\\\"}\")\n    \
-                 db.close(conn)\n\
-             }\n"
-                .to_string(),
-        ),
+        f("handlers/users.vd", users_vd),
         f(
             "domain/user.vd",
             "// User entity.\npublic struct User {\n    id   int\n    name string\n}\n".to_string(),

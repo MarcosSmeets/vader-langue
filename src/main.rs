@@ -900,8 +900,8 @@ fn cmd_new(args: &[String]) -> ExitCode {
             Some(d) => d,
             None => return ExitCode::FAILURE,
         };
-        if !matches!(db.as_str(), "sqlite" | "postgres" | "mysql") {
-            eprintln!("error: unknown database `{}` (sqlite|postgres|mysql)", db);
+        if !matches!(db.as_str(), "sqlite" | "postgres" | "mysql" | "mongo") {
+            eprintln!("error: unknown database `{}` (sqlite|postgres|mysql|mongo)", db);
             return ExitCode::FAILURE;
         }
         return match scaffold::create_api_tdd(name, &db) {
@@ -954,6 +954,7 @@ fn prompt_database() -> Option<String> {
     println!("  1) sqlite    (zero setup, embedded — recommended to start)");
     println!("  2) postgres");
     println!("  3) mysql");
+    println!("  4) mongo     (document store)");
     print!("> ");
     let _ = std::io::stdout().flush();
     let mut line = String::new();
@@ -964,8 +965,9 @@ fn prompt_database() -> Option<String> {
         "1" | "sqlite" | "" => Some("sqlite".to_string()),
         "2" | "postgres" => Some("postgres".to_string()),
         "3" | "mysql" => Some("mysql".to_string()),
+        "4" | "mongo" => Some("mongo".to_string()),
         other => {
-            eprintln!("unknown choice `{}` (1/2/3)", other);
+            eprintln!("unknown choice `{}` (1/2/3/4)", other);
             None
         }
     }
