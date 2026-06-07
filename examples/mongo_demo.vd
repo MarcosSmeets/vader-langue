@@ -1,0 +1,32 @@
+// MongoDB document store — insert and find with JSON documents.
+// Requires a running MongoDB (no auth): mongodb://127.0.0.1:27017/vaderdb
+import "std/mongo"
+import "std/json"
+
+public fn main() {
+    Mongo m = mongo.connect("mongodb://127.0.0.1:27017/vaderdb")
+
+    Json marco = json.object()
+    json.set_str(marco, "name", "Marco")
+    json.set_int(marco, "age", 30)
+    error e = mongo.insert(m, "users", marco)
+    if e != nil {
+        print("insert error:", e)
+    }
+
+    Json ada = json.object()
+    json.set_str(ada, "name", "Ada")
+    json.set_int(ada, "age", 36)
+    mongo.insert(m, "users", ada)
+
+    Json all = mongo.find(m, "users", json.object())
+    print("found", json.count(all), "documents")
+    int i = 0
+    for i < json.count(all) {
+        Json u = json.elem(all, i)
+        print(json.as_str(json.field(u, "name")), json.as_int(json.field(u, "age")))
+        i = i + 1
+    }
+
+    mongo.close(m)
+}

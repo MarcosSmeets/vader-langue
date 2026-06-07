@@ -258,6 +258,30 @@ void *vader_json_add_int(void *a, long long val) {
     JVal *v = jnew(J_INT); v->i = val; arr_add(a, v); return a;
 }
 
+/* ---- low-level accessors for tree traversal (used by the Mongo/BSON driver) ---- */
+int vader_json_type(void *jv) { return jv ? ((JVal *)jv)->type : J_NULL; }
+int vader_json_keycount(void *jv) {
+    JVal *v = jv;
+    return (v && (v->type == J_OBJ || v->type == J_ARR)) ? v->count : 0;
+}
+const char *vader_json_key_at(void *jv, int idx) {
+    JVal *v = jv;
+    if (v && v->type == J_OBJ && idx >= 0 && idx < v->count) return v->keys[idx];
+    return "";
+}
+void *vader_json_value_at(void *jv, int idx) {
+    JVal *v = jv;
+    if (v && (v->type == J_OBJ || v->type == J_ARR) && idx >= 0 && idx < v->count)
+        return v->items[idx];
+    return &JNULL;
+}
+void *vader_json_add_float(void *a, double val) {
+    JVal *v = jnew(J_DBL); v->d = val; arr_add(a, v); return a;
+}
+void *vader_json_add_bool(void *a, int val) {
+    JVal *v = jnew(J_BOOL); v->b = val; arr_add(a, v); return a;
+}
+
 /* ===================== encode ============================================ */
 typedef struct { char *buf; int len, cap; } SB;
 static void sb_putc(SB *s, char c) {

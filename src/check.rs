@@ -70,7 +70,7 @@ pub fn check(program: &Program) -> Result<(), Vec<TypeError>> {
         enums: HashSet::new(),
         interfaces: HashSet::new(),
         type_params: HashSet::new(),
-        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena", "Router", "Stmt"]
+        opaque: ["DB", "Rows", "Server", "Json", "Conn", "Arena", "Router", "Stmt", "Mongo"]
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -274,6 +274,22 @@ impl Checker {
             let sigs: [(&str, Vec<Ty>, Vec<Ty>); 2] = [
                 ("scope", vec![], vec![Unknown]),
                 ("release", vec![Unknown], vec![]),
+            ];
+            for (name, params, returns) in sigs {
+                self.functions
+                    .entry(name.to_string())
+                    .or_insert(FnSig { params, returns });
+            }
+        }
+
+        // std/mongo: document store (Mongo -> opaque Unknown; documents are Json).
+        if program.imports.iter().any(|i| i.starts_with("std/mongo")) {
+            use Ty::*;
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 4] = [
+                ("connect", vec![String], vec![Unknown]),
+                ("insert", vec![Unknown, String, Unknown], vec![Error]),
+                ("find", vec![Unknown, String, Unknown], vec![Unknown]),
+                ("close", vec![Unknown], vec![]),
             ];
             for (name, params, returns) in sigs {
                 self.functions

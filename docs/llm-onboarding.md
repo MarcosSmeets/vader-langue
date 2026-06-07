@@ -93,7 +93,7 @@ int v = <-ch                                 // receive;  ch <- 42  to send
 
 Imported with `import "std/x"`. Calls are written qualified (`http.listen`, `db.open`); the
 package prefix is normalized away by the compiler, so don't worry about it. Opaque handle
-types: `Server`, `DB`, `Rows`, `Json`, `Router`, `Arena`.
+types: `Server`, `DB`, `Rows`, `Json`, `Router`, `Arena`, `Stmt`, `Mongo`.
 
 **std/http** — server, router and client:
 ```vader
@@ -138,6 +138,24 @@ for db.next(rows) {
     print(id, name)
 }
 db.close(c)
+```
+
+Parameterized queries (safe, cross-DB) use `?` placeholders + bind:
+```vader
+Stmt st = db.prepare(c, "INSERT INTO users (name) VALUES (?)")
+db.bind_str(st, name)        // also bind_int / bind_float
+db.run(st)                   // or db.query_stmt(st): Rows
+```
+
+**std/mongo** — MongoDB document store (no auth; documents are `Json`):
+```vader
+import "std/mongo"
+Mongo m = mongo.connect("mongodb://127.0.0.1:27017/mydb")
+Json doc = json.object()
+json.set_str(doc, "name", "Ada")
+mongo.insert(m, "users", doc)                    // returns error
+Json results = mongo.find(m, "users", json.object())  // filter {} = all; returns a Json array
+mongo.close(m)
 ```
 
 **std/env** — `string v = env.read("DATABASE_URL")` (empty string if unset).

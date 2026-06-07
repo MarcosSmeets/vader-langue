@@ -54,6 +54,7 @@ struct Gen {
     has_json: bool,
     has_mem: bool,
     has_env: bool,
+    has_mongo: bool,
     needs: Needs,
 }
 
@@ -71,6 +72,7 @@ struct Needs {
     json: bool,
     mem: bool,
     env: bool,
+    mongo: bool,
 }
 
 enum MatchMode {
@@ -110,6 +112,7 @@ pub fn generate(program: &Program) -> Result<String, String> {
         has_json: program.imports.iter().any(|i| i.starts_with("std/json")),
         has_mem: program.imports.iter().any(|i| i.starts_with("std/mem")),
         has_env: program.imports.iter().any(|i| i.starts_with("std/env")),
+        has_mongo: program.imports.iter().any(|i| i.starts_with("std/mongo")),
         needs: Needs::default(),
     };
 
@@ -353,6 +356,14 @@ pub fn generate(program: &Program) -> Result<String, String> {
     if g.needs.env {
         result.push_str("declare i8* @vader_env_read(i8*)\n");
     }
+    if g.needs.mongo {
+        result.push_str(
+            "declare i8* @vader_mongo_connect(i8*)\n\
+             declare i8* @vader_mongo_insert(i8*, i8*, i8*)\n\
+             declare i8* @vader_mongo_find(i8*, i8*, i8*)\n\
+             declare void @vader_mongo_close(i8*)\n",
+        );
+    }
     if g.needs.map {
         result.push_str(
             "declare i8* @vader_map_make(i64, i32)\n\
@@ -422,7 +433,9 @@ impl Gen {
                 "bool" => "i1".to_string(),
                 "float" => "double".to_string(),
                 "string" | "error" => "i8*".to_string(),
-                "DB" | "Rows" | "Server" | "Json" | "Arena" | "Router" | "Stmt" => "i8*".to_string(), // opaque stdlib handles
+                "DB" | "Rows" | "Server" | "Json" | "Arena" | "Router" | "Stmt" | "Mongo" => {
+                    "i8*".to_string() // opaque stdlib handles
+                }
                 other => {
                     if self.structs.contains_key(other)
                         || self.enums.contains_key(other)
@@ -1545,6 +1558,23 @@ impl Gen {
         Ok(Some(self.emit_extern(en, ret, ptys, args)?))
     }
 
+    /// Intrinsics of `std/mongo`: document API (connect/insert/find/close).
+    fn gen_mongo_call(
+        &mut self,
+        name: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, String)>, String> {
+        let (en, ret, ptys): (&str, &str, &[&str]) = match name {
+            "connect" => ("vader_mongo_connect", "i8*", &["i8*"]),
+            "insert" => ("vader_mongo_insert", "i8*", &["i8*", "i8*", "i8*"]),
+            "find" => ("vader_mongo_find", "i8*", &["i8*", "i8*", "i8*"]),
+            "close" => ("vader_mongo_close", "void", &["i8*"]),
+            _ => return Ok(None),
+        };
+        self.needs.mongo = true;
+        Ok(Some(self.emit_extern(en, ret, ptys, args)?))
+    }
+
     /// Emits a call to an external function (C runtime). Coerces args (i64->i32,
     /// i1->i32) and converts the return value (i1<-i32 via icmp; void; otherwise direct).
     fn emit_extern(
@@ -1714,6 +1744,11 @@ impl Gen {
         }
         if self.has_env {
             if let Some(r) = self.gen_env_call(&name, args)? {
+                return Ok(r);
+            }
+        }
+        if self.has_mongo {
+            if let Some(r) = self.gen_mongo_call(&name, args)? {
                 return Ok(r);
             }
         }
@@ -2311,6 +2346,29 @@ mod tests {
         assert!(out.contains("bitcast void (i8*)* @h to i8*")); // function as a value
         assert!(out.contains("@vader_router_add"));
         assert!(out.contains("call void @vader_router_serve"));
+    }
+
+    #[test]
+    fn emits_mongo_document_calls() {
+        use crate::module;
+        use std::collections::HashSet;
+        let src = "import \"std/mongo\"\n\
+                   import \"std/json\"\n\
+                   public fn main() {\n\
+                   Mongo m = mongo.connect(\"mongodb://localhost/db\")\n\
+                   Json d = json.object()\n\
+                   mongo.insert(m, \"c\", d)\n\
+                   Json r = mongo.find(m, \"c\", json.object())\n\
+                   mongo.close(m)\n\
+                   }";
+        let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
+        let pkgs: HashSet<String> = ["mongo".to_string(), "json".to_string()].into_iter().collect();
+        module::normalize(&mut prog, &pkgs);
+        let out = generate(&prog).unwrap();
+        assert!(out.contains("@vader_mongo_connect"));
+        assert!(out.contains("@vader_mongo_insert"));
+        assert!(out.contains("@vader_mongo_find"));
+        assert!(out.contains("@vader_mongo_close"));
     }
 
     #[test]

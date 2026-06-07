@@ -12,7 +12,7 @@ rather than optional.
 > usually costs discipline — all built in._
 
 Vader compiles to a single native binary (Go/C style), is strongly and explicitly typed,
-and ships database drivers (SQLite, PostgreSQL, MySQL) and a concurrency runtime embedded
+and ships database drivers (SQLite, PostgreSQL, MySQL, MongoDB) and a concurrency runtime embedded
 in the compiler — zero install for the end user.
 
 ---

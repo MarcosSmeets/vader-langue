@@ -25,6 +25,8 @@ const VADER_HTTP_C: &str = include_str!("../runtime/vader_http.c");
 const VADER_JSON_C: &str = include_str!("../runtime/vader_json.c");
 /// HTTP router (newRouter + r.get/post + serve).
 const VADER_ROUTER_C: &str = include_str!("../runtime/vader_router.c");
+/// MongoDB client (BSON + OP_MSG): connect/insert/find/close.
+const VADER_MONGO_C: &str = include_str!("../runtime/vader_mongo.c");
 /// Arena/region allocator (long-lived service memory): bump-alloc per scope.
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 /// std/os and std/env: access to the process environment.
@@ -637,8 +639,11 @@ fn build_run_program(
             cmd.arg(cached_obj(&dir, "vader_router", VADER_ROUTER_C, &[], quiet)?);
         }
     }
-    if ir.contains("@vader_json_") {
+    if ir.contains("@vader_json_") || ir.contains("@vader_mongo_") {
         cmd.arg(cached_obj(&dir, "vader_json", VADER_JSON_C, &[], quiet)?);
+    }
+    if ir.contains("@vader_mongo_") {
+        cmd.arg(cached_obj(&dir, "vader_mongo", VADER_MONGO_C, &[], quiet)?);
     }
     cmd.arg("-o").arg(&bin);
     match cmd.status() {
