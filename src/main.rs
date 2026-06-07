@@ -517,6 +517,40 @@ fn build_run_source(source: &str, quiet: bool, tls: bool, out: Option<&str>) -> 
     build_run_program(&program, quiet, tls, out)
 }
 
+/// Compiles a runtime C source to a `.o`, cached by content hash (+ compile flags),
+/// so DB/HTTP builds don't recompile the runtime every time. Returns the object path.
+fn cached_obj(
+    dir: &std::path::Path,
+    name: &str,
+    source: &str,
+    extra: &[&str],
+    quiet: bool,
+) -> Result<std::path::PathBuf, String> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut h);
+    extra.hash(&mut h);
+    let obj = dir.join(format!("{}-{:016x}.o", name, h.finish()));
+    if obj.exists() {
+        return Ok(obj);
+    }
+    let src = dir.join(format!("{}.c", name));
+    std::fs::write(&src, source).map_err(|e| format!("write {}: {}", name, e))?;
+    if !quiet {
+        println!("(compiling {} — cached after the first build)", name);
+    }
+    let mut c = Command::new("clang");
+    c.arg("-c").arg("-O2");
+    for a in extra {
+        c.arg(a);
+    }
+    c.arg(&src).arg("-o").arg(&obj).current_dir(dir);
+    match c.status() {
+        Ok(s) if s.success() => Ok(obj),
+        _ => Err(format!("clang failed to compile {}", name)),
+    }
+}
+
 /// Type-checks, generates LLVM IR, compiles with clang and runs. Used by
 /// `vader llvm <file|dir>` and `vader migrate`.
 fn build_run_program(
@@ -559,16 +593,10 @@ fn build_run_program(
     // -O2: the IR we emit is naive; let LLVM optimize it (competitive native code).
     cmd.arg("-O2").arg("-Wno-override-module").arg(&ll);
     if ir.contains("@vader_") {
-        let rt = dir.join("vader_rt.c");
-        let mem = dir.join("vader_mem.c");
-        let os = dir.join("vader_os.c");
-        std::fs::write(&rt, RUNTIME_C).map_err(|e| format!("write runtime: {}", e))?;
-        std::fs::write(&mem, VADER_MEM_C).map_err(|e| format!("write vader_mem.c: {}", e))?;
-        std::fs::write(&os, VADER_OS_C).map_err(|e| format!("write vader_os.c: {}", e))?;
-        cmd.arg(&rt).arg(&mem).arg(&os).arg("-lpthread");
-        if !quiet {
-            println!("(linking runtime + arena allocator)");
-        }
+        cmd.arg(cached_obj(&dir, "vader_rt", RUNTIME_C, &[], quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_mem", VADER_MEM_C, &[], quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_os", VADER_OS_C, &[], quiet)?);
+        cmd.arg("-lpthread");
     }
     if ir.contains("@vader_db_") {
         let hdr = dir.join("sqlite3.h");
@@ -593,42 +621,24 @@ fn build_run_program(
                 _ => return Err("clang failed to compile SQLite".into()),
             }
         }
-        let db_c = dir.join("vader_db.c");
-        let pg_c = dir.join("vader_pg.c");
-        let my_c = dir.join("vader_mysql.c");
-        std::fs::write(&db_c, VADER_DB_C).map_err(|e| format!("write vader_db.c: {}", e))?;
-        std::fs::write(&pg_c, VADER_PG_C).map_err(|e| format!("write vader_pg.c: {}", e))?;
-        std::fs::write(&my_c, VADER_MYSQL_C).map_err(|e| format!("write vader_mysql.c: {}", e))?;
-        cmd.arg(&obj).arg(&db_c).arg(&pg_c).arg(&my_c);
+        cmd.arg(&obj); // cached sqlite3.o
+        cmd.arg(cached_obj(&dir, "vader_db", VADER_DB_C, &[], quiet)?);
+        let pg_args: &[&str] = if tls { &["-DVADER_TLS"] } else { &[] };
+        cmd.arg(cached_obj(&dir, "vader_pg", VADER_PG_C, pg_args, quiet)?);
+        cmd.arg(cached_obj(&dir, "vader_mysql", VADER_MYSQL_C, &[], quiet)?);
         if tls {
-            // TLS for Postgres (cloud): enables the OpenSSL path in the driver.
-            cmd.arg("-DVADER_TLS").arg("-lssl").arg("-lcrypto");
+            cmd.arg("-lssl").arg("-lcrypto"); // TLS for Postgres (cloud)
         }
         cmd.arg("-lpthread").arg("-ldl").arg("-lm");
-        if !quiet {
-            println!("(linking SQLite + Postgres + MySQL{})", if tls { " + TLS" } else { "" });
-        }
     }
     if ir.contains("@vader_http_") || ir.contains("@vader_router_") {
-        let c = dir.join("vader_http.c");
-        std::fs::write(&c, VADER_HTTP_C).map_err(|e| format!("write vader_http.c: {}", e))?;
-        cmd.arg(&c);
+        cmd.arg(cached_obj(&dir, "vader_http", VADER_HTTP_C, &[], quiet)?);
         if ir.contains("@vader_router_") {
-            let rc = dir.join("vader_router.c");
-            std::fs::write(&rc, VADER_ROUTER_C).map_err(|e| format!("write vader_router.c: {}", e))?;
-            cmd.arg(&rc);
-        }
-        if !quiet {
-            println!("(linking std/http)");
+            cmd.arg(cached_obj(&dir, "vader_router", VADER_ROUTER_C, &[], quiet)?);
         }
     }
     if ir.contains("@vader_json_") {
-        let c = dir.join("vader_json.c");
-        std::fs::write(&c, VADER_JSON_C).map_err(|e| format!("write vader_json.c: {}", e))?;
-        cmd.arg(&c);
-        if !quiet {
-            println!("(linking std/json)");
-        }
+        cmd.arg(cached_obj(&dir, "vader_json", VADER_JSON_C, &[], quiet)?);
     }
     cmd.arg("-o").arg(&bin);
     match cmd.status() {
