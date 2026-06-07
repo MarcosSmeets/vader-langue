@@ -1,0 +1,20 @@
+PackageIdentifier: Marco.Vader
+PackageVersion: 0.4.0
+PackageLocale: en-US
+Publisher: Marcos Smeets
+PublisherUrl: https://github.com/MarcosSmeets
+PackageName: Vader
+PackageUrl: https://github.com/MarcosSmeets/vader-langue
+License: MIT
+LicenseUrl: https://github.com/MarcosSmeets/vader-langue/blob/main/LICENSE
+ShortDescription: The Vader programming language compiler.
+Description: >-
+  Vader is a compiled, statically-typed language with an opinionated toolchain
+  (Clean Architecture + TDD scaffolding, native LLVM backend, built-in HTTP/JSON/DB).
+Tags:
+  - programming-language
+  - compiler
+  - vader
+  - llvm
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

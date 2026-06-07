@@ -26,6 +26,26 @@ $dest = Join-Path $bindir 'vader.exe'
 Write-Host "vader-install: downloading $asset ($version)..."
 Invoke-WebRequest -Uri $url -OutFile $dest
 
+# Verify the checksum against the published <url>.sha256 (best-effort).
+try {
+  $expected = (((Invoke-WebRequest -Uri "$url.sha256" -UseBasicParsing).Content).Trim() -split '\s+')[0].ToLower()
+} catch {
+  $expected = $null
+}
+if ($expected) {
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $dest).Hash.ToLower()
+  if ($expected -ne $actual) {
+    Remove-Item $dest -Force
+    throw "vader-install: checksum mismatch (expected $expected, got $actual)"
+  }
+  Write-Host "vader-install: checksum OK"
+} elseif ($env:VADER_REQUIRE_CHECKSUM -eq '1') {
+  Remove-Item $dest -Force
+  throw "vader-install: no checksum published for this release"
+} else {
+  Write-Host "vader-install: checksum not published for this release - skipping verification"
+}
+
 # Add to the user PATH if it isn't there already.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $bindir) {

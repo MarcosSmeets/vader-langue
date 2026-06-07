@@ -23,6 +23,37 @@ TMP=""
 cleanup() { [ -n "$TMP" ] && rm -f "$TMP" 2>/dev/null || true; }
 trap cleanup EXIT
 
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$1" 2>/dev/null
+  fi
+}
+
+# Verifies $file against the published `<url>.sha256`. Best-effort: warns (or, with
+# VADER_REQUIRE_CHECKSUM=1, aborts) when the release has no checksum.
+verify_checksum() {
+  url="$1"
+  file="$2"
+  expected="$(fetch "${url}.sha256" | awk '{print $1}' | head -n1)"
+  if [ -z "$expected" ]; then
+    [ "${VADER_REQUIRE_CHECKSUM:-}" = "1" ] && err "no checksum published for this release"
+    say "checksum not published for this release — skipping verification"
+    return 0
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$file" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  else
+    say "no sha256 tool available — skipping verification"
+    return 0
+  fi
+  [ "$expected" = "$actual" ] || err "checksum mismatch (expected $expected, got $actual)"
+  say "checksum OK"
+}
+
 if [ "${1:-}" = "--source" ] || [ "${1:-}" = "-s" ] || [ "${VADER_FROM_SOURCE:-}" = "1" ]; then
   # --- build from source ---
   command -v cargo >/dev/null 2>&1 || err "'cargo' (Rust) not found — install it at https://rustup.rs"
@@ -65,6 +96,7 @@ else
   else
     err "need 'curl' or 'wget' to download."
   fi
+  verify_checksum "$url" "$TMP"
   SRC="$TMP"
 fi
 

@@ -1,27 +1,28 @@
-# Fórmula Homebrew (template). Depois de publicar os binários numa release do GitHub,
-# preencha os `sha256` (use `shasum -a 256 <arquivo>`) e troque SEU-USUARIO.
-# Instalação pelo usuário:  brew install SEU-USUARIO/tap/vader
-#   (com um tap próprio: github.com/SEU-USUARIO/homebrew-tap, este arquivo em Formula/)
+# Homebrew formula for the Vader compiler (prebuilt binary from GitHub Releases).
+# Install via a tap:  brew install MarcosSmeets/tap/vader
+#   (create github.com/MarcosSmeets/homebrew-tap with this file under Formula/)
+# When you publish a new release, bump `version`, the URLs, and the three `sha256`
+# values (`shasum -a 256 <file>`, or grab the published `<asset>.sha256`).
 class Vader < Formula
   desc "The Vader programming language compiler"
   homepage "https://github.com/MarcosSmeets/vader-langue"
-  version "0.1.0"
+  version "0.4.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.1.0/vader-macos-arm64"
-      sha256 "PREENCHER_SHA256_MACOS_ARM64"
+      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-macos-arm64"
+      sha256 "6f33a722c110c2547c078dab42897492ceb0a6c33c07e9faa342d8cbf4731ce8"
     end
     on_intel do
-      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.1.0/vader-macos-x86_64"
-      sha256 "PREENCHER_SHA256_MACOS_X86_64"
+      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-macos-x86_64"
+      sha256 "ee99e66b6618562e5565f731d633e41d3cabceaca238523bbecbb05a80a843f2"
     end
   end
 
   on_linux do
-    url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.1.0/vader-linux-x86_64"
-    sha256 "PREENCHER_SHA256_LINUX_X86_64"
+    url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-linux-x86_64"
+    sha256 "b43eee35f482547d8052753b2dde90ac7ced3e90fb7dd6b61af452fa8805b3d3"
   end
 
   def install
