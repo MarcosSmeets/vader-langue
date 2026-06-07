@@ -181,6 +181,17 @@ to LLVM touches only the last box.
       `index.json` (local dir or git repo, no dedicated server); `vader publish` registers the
       package in the index. **Verified** (publish → add by name → run). The central index can be
       a GitHub repo (tap style).
+- [x] **General-purpose stdlib** — `std/strings`, `std/math`, `std/time`, `std/fs`, `std/fmt`
+      (alongside `std/http`, `std/db`, `std/json`, `std/env`, `std/mem`, `std/mongo`). Verified
+      end-to-end (`examples/stdlib_demo.vd`).
+
+### Platform support
+
+- **`vader build` / `vader run`** (Go backend): Linux, macOS, Windows (needs Go). Native everywhere.
+- **`vader llvm`** (native backend + the C stdlib): **Linux** native (verified); **macOS** native
+  (POSIX runtime — clang/sockets/pthread; not yet CI-verified); **Windows** via **WSL** (the runtime
+  is POSIX: sockets/pthread). `vader llvm` on native Windows is blocked with a clear message and
+  points to WSL / the Go backend. A native-Windows runtime (Winsock + Windows threads) is future work.
 - [x] **stdlib `std/http`** — server (`listen/accept/method/path/body/header/respond`) +
       client (`get/post`), HTTP/1.1 on the C runtime. **Verified with `curl`** and with Vader's own
       HTTP client. No TLS in the v1 client.

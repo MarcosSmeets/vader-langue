@@ -2583,7 +2583,7 @@ mod tests {
                    []string p = strings.split(\"a,b\", \",\")\n\
                    string j = strings.join(p, \"-\")\n\
                    string u = strings.upper(p[0])\n\
-                   double r = math.sqrt(4.0)\n\
+                   float r = math.sqrt(4.0)\n\
                    }";
         let mut prog = parser::parse(lexer::tokenize(src).unwrap()).unwrap();
         let pkgs: HashSet<String> = ["strings".to_string(), "math".to_string()].into_iter().collect();

@@ -463,6 +463,17 @@ fn write_lock(deps: &[pkg::Dep]) {
 
 /// `vader llvm <file.vd>` — Vader -> LLVM IR (text) -> clang -> native binary -> run.
 fn cmd_llvm(args: &[String]) -> ExitCode {
+    // The native backend links a POSIX C runtime (sockets/pthread); Windows isn't
+    // supported natively yet. Be explicit instead of failing with a cryptic clang error.
+    if cfg!(target_os = "windows") {
+        eprintln!(
+            "error: `vader llvm` (native backend) needs a POSIX toolchain (clang + the C runtime),\n\
+             which isn't supported on native Windows yet. Options:\n\
+             - run it inside WSL (recommended on Windows), or\n\
+             - use the Go backend: `vader build` / `vader run` (works natively on Windows)."
+        );
+        return ExitCode::FAILURE;
+    }
     // parse: first non-flag arg is the file/dir; `--out <path>` builds without running.
     let mut path: Option<&String> = None;
     let mut out: Option<&str> = None;
