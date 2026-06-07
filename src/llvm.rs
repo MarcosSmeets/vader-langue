@@ -632,6 +632,10 @@ impl Gen {
 
     /// Emits a runtime bounds check for a slice index (panics with the line on overflow).
     fn bounds_check(&mut self, slice_ty: &str, slice_val: &str, idx: &str, line: usize) {
+        // only real slices `{ T*, i64 }` carry a length; skip for other base types.
+        if !slice_ty.starts_with('{') {
+            return;
+        }
         let len = self.fresh();
         self.emit(&format!("{} = extractvalue {} {}, 1", len, slice_ty, slice_val));
         self.emit(&format!(

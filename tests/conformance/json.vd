@@ -1,0 +1,12 @@
+// std/json: build, encode, parse, access
+import "std/json"
+public fn main() {
+    Json o = json.object()
+    json.set_str(o, "name", "Vader")
+    json.set_int(o, "v", 1)
+    print(json.encode(o))
+    Json p = json.parse("{\"age\": 30, \"tags\": [\"a\", \"b\"]}")
+    print(json.as_int(json.field(p, "age")))
+    Json tags = json.field(p, "tags")
+    print(json.count(tags), json.as_str(json.elem(tags, 0)))
+}

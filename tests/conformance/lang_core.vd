@@ -1,0 +1,26 @@
+// arithmetic, control flow, functions, multi-return, recursion
+fn add(a, b int): int { return a + b }
+fn divmod(a, b int): (int, int) { return a / b, a % b }
+fn fact(n int): int {
+    if n <= 1 { return 1 }
+    return n * fact(n - 1)
+}
+public fn main() {
+    print(add(3, 4))
+    print(2 * 3 + 1)
+    print(10 / 3, 10 % 3)
+    print(fact(5))
+    int q, int r = divmod(17, 5)
+    print(q, r)
+    int sum = 0
+    for i in 0..5 { sum = sum + i }
+    print(sum)
+    int n = 3
+    string s = ""
+    for n > 0 {
+        s = s + "*"
+        n = n - 1
+    }
+    print(s)
+    if 2 > 1 { print("yes") } else { print("no") }
+}

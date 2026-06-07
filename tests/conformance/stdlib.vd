@@ -1,0 +1,22 @@
+// std/strings, std/math, std/fmt
+import "std/strings"
+import "std/math"
+import "std/fmt"
+
+public fn main() {
+    print(strings.upper("vader"))
+    print(strings.trim("  hi  "))
+    print(strings.replace("a-b-c", "-", "+"))
+    print(strings.substring("abcdef", 1, 4))
+    print(strings.contains("hello", "ell"))
+    print(strings.to_int("40") + 2)
+    []string parts = strings.split("x,y,z", ",")
+    print(len(parts), parts[1], strings.join(parts, "|"))
+
+    print(math.sqrt(144.0))
+    print(math.pow(2.0, 10.0))
+    print(math.max(7, 3), math.abs_int(-9))
+
+    print("n=" + fmt.from_int(123))
+    print(fmt.pad_left("7", 4, "0"))
+}

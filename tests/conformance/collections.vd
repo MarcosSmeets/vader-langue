@@ -1,0 +1,20 @@
+// slices, maps, generics, for-in
+fn id[T](x T): T { return x }
+
+public fn main() {
+    []int nums = [10, 20, 30]
+    print(len(nums), nums[0], nums[2])
+    int total = 0
+    for n in nums { total = total + n }
+    print(total)
+
+    map[string]int ages = newmap()
+    ages["ada"] = 36
+    ages["alan"] = 41
+    print(ages["ada"], ages["alan"], len(ages))
+
+    print(id(42), id("hi"))
+
+    []string words = ["a", "bb", "ccc"]
+    print(len(words), words[1])
+}

@@ -67,7 +67,7 @@ Structs, methods, enums + match, interfaces, generics, collections, concurrency:
 public struct User { id int  name string }
 fn (u User) greeting(): string { return "hi " + u.name }
 
-enum Shape { Circle(float)  Rectangle(float, float)  Point }
+enum Shape { Circle(r float)  Rectangle(w float, h float)  Point }   // variant fields are named
 fn area(s Shape): float {
     return match s {
         Circle(r): 3.14159 * r * r
@@ -80,7 +80,7 @@ interface Animal { fn sound(): string }     // structs implement it by having th
 
 fn id[T](x T): T { return x }                // generics with [T]
 
-[]int xs = []int{10, 20, 30}                 // slice literal; xs[0], len(xs)
+[]int xs = [10, 20, 30]                       // slice literal; xs[0], len(xs)
 map[string]int m = newmap()                  // map; m["k"] = 1
 chan[int] ch = chan[int](0)                  // channel
 spawn worker(ch)                             // goroutine

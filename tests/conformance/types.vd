@@ -1,0 +1,33 @@
+// structs, methods, enums + match, interfaces (dynamic dispatch)
+public struct Point { x int  y int }
+fn (p Point) sum(): int { return p.x + p.y }
+
+enum Shape {
+    Circle(r float)
+    Rect(w float, h float)
+    Dot
+}
+fn area(s Shape): float {
+    return match s {
+        Circle(r): 3.0 * r * r
+        Rect(w, h): w * h
+        Dot: 0.0
+    }
+}
+
+interface Animal { fn sound(): string }
+public struct Dog {}
+fn (d Dog) sound(): string { return "woof" }
+public struct Cat {}
+fn (c Cat) sound(): string { return "meow" }
+fn speak(a Animal): string { return a.sound() }
+
+public fn main() {
+    Point p = Point{ x: 3, y: 4 }
+    print(p.sum())
+    print(area(Circle(2.0)))
+    print(area(Rect(3.0, 5.0)))
+    Dog d = Dog{}
+    Cat c = Cat{}
+    print(speak(d), speak(c))
+}
