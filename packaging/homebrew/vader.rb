@@ -4,23 +4,23 @@
 class Vader < Formula
   desc "The Vader programming language compiler"
   homepage "https://github.com/MarcosSmeets/vader-langue"
-  version "0.4.0"
+  version "1.0.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-macos-arm64"
-      sha256 "6f33a722c110c2547c078dab42897492ceb0a6c33c07e9faa342d8cbf4731ce8"
+      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v1.0.0/vader-macos-arm64"
+      sha256 "63b1630d4268463168d01338b61897fca0a1c1bba3c65f5407c88f50c8369373"
     end
     on_intel do
-      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-macos-x86_64"
-      sha256 "ee99e66b6618562e5565f731d633e41d3cabceaca238523bbecbb05a80a843f2"
+      url "https://github.com/MarcosSmeets/vader-langue/releases/download/v1.0.0/vader-macos-x86_64"
+      sha256 "bf9afa5cbf4a8965d08ae907abea5d0abed77bf84cff823fd0b508b4ffa47ef4"
     end
   end
 
   on_linux do
-    url "https://github.com/MarcosSmeets/vader-langue/releases/download/v0.4.0/vader-linux-x86_64"
-    sha256 "b43eee35f482547d8052753b2dde90ac7ced3e90fb7dd6b61af452fa8805b3d3"
+    url "https://github.com/MarcosSmeets/vader-langue/releases/download/v1.0.0/vader-linux-x86_64"
+    sha256 "b75980685b7ec9847b27fd96759b8d73fb34a4f563a61360844f3534bccee796"
   end
 
   def install
