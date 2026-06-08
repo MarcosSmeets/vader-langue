@@ -7,13 +7,16 @@ emits LLVM IR and links a native binary. Semantics are close to Go; ergonomics a
 ## Build & run
 
 ```bash
-vader llvm file.vd          # compile a single file natively and run it
-vader llvm ./myproject      # compile a whole project directory and run it
-vader llvm --out app .      # compile to ./app without running (for Docker/deploy)
-vader run file.vd           # alternative: transpile to Go and run
-vader test                  # run test blocks + coverage
-vader new api myapi --arch tdd   # scaffold a ready-to-run REST API (prompts for the DB)
+vader run file.vd           # compile a single file natively and run it
+vader run ./myproject       # compile a whole project directory and run it
+vader run                   # in a project: build + run main.vd / the project
+vader build --out app .     # compile to ./app without running (for Docker/deploy)
+vader test                  # run test blocks + coverage (native)
+vader new api myapi         # scaffold a ready-to-run REST API (prompts for the DB)
 ```
+
+The whole pipeline is native (LLVM + clang); there is no Go backend. `vader llvm` is a
+low-level alias for `vader run`.
 
 ## Core rules (read these first)
 
@@ -195,9 +198,13 @@ mem.release(a)             // free everything from this job at once (no GC)
 - Conditions take **no** parentheses: `if x > 0 {`, `for i < n {`.
 - Errors are values, not exceptions: return `(T, error)` and check `if err != nil`.
 - `nil` is assignable to `error`, structs, slices, channels, enums.
-- A program using the native stdlib (http/db/json/env/mem/router) must build with
-  `vader llvm` (not the Go backend).
+- The toolchain is native-only (`clang` required); `vader build`/`run`/`test` all compile
+  through LLVM. There is no Go backend.
+- An HTTP server binds on IPv4 — reach it with `curl 127.0.0.1:8080`, not `localhost`
+  (which may resolve to IPv6 `::1`).
 - Type names must be unique across a project (the module system flattens files).
+- Function values can be passed by name (router handlers), but a function *type* as a
+  parameter (`fn(string)`) is not supported — use an interface instead.
 
 ## A complete REST endpoint (HTTP + DB + JSON)
 
