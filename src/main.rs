@@ -4,8 +4,8 @@
 //!   vader lex   <file.vd>   print the token stream
 //!   vader parse <file.vd>   print the AST
 //!   vader check <file.vd>   type-check and report errors
-//!   vader build <file.vd>   compile to a native binary (via Go)
-//!   vader run   <file.vd>   compile and run
+//!   vader build [path]      compile to a native binary (defaults to the project/main.vd)
+//!   vader run   [path]      compile and run (defaults to the project/main.vd)
 
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -39,10 +39,12 @@ const VADER_FMT_C: &str = include_str!("../runtime/vader_fmt.c");
 const VADER_MEM_C: &str = include_str!("../runtime/vader_mem.c");
 /// std/os and std/env: access to the process environment.
 const VADER_OS_C: &str = include_str!("../runtime/vader_os.c");
+/// `vader test` harness: coverage tracking + the test runner (linked only in test builds).
+const VADER_TEST_C: &str = include_str!("../runtime/vader_test.c");
 
 use vader::ast::Program;
 use vader::{
-    check, codegen, formatter, gen, lexer, lint, llvm, migrate, module, parser, pkg, scaffold,
+    check, formatter, gen, lexer, lint, llvm, migrate, module, parser, pkg, scaffold,
     templates,
 };
 
@@ -50,7 +52,8 @@ fn usage() {
     eprintln!("vader {} — compiler (Phase 1)", env!("CARGO_PKG_VERSION"));
     eprintln!("usage:");
     eprintln!("  vader new <kind> <name> [--arch <arch>]   scaffold a project");
-    eprintln!("       kind: api|worker|cli|lib   arch: clean|hexagonal|mvc|minimal");
+    eprintln!("       kind: api|worker|cli|lib   arch: tdd|clean|hexagonal|mvc|ddd|minimal");
+    eprintln!("       api archs scaffold a full vertical slice (HTTP+DB+router), layer rules enforced");
     eprintln!("  vader new --template <tmpl> <name>   scaffold from a custom template");
     eprintln!("  vader template list                  list custom templates");
     eprintln!("  vader template save <tmpl> <dir>     save a folder as a template");
@@ -70,9 +73,10 @@ fn usage() {
     eprintln!("  vader lex   <file.vd>   print the token stream");
     eprintln!("  vader parse <file.vd>   print the AST");
     eprintln!("  vader check <file.vd>   type-check and report errors");
-    eprintln!("  vader build <file.vd>   compile to a native binary (via Go)");
-    eprintln!("  vader run   <file.vd>   compile and run");
-    eprintln!("  vader llvm  <file.vd>   compile via LLVM IR + clang (no Go) and run");
+    eprintln!("  vader build [path]      compile to a native binary (defaults to ./ , the project/main.vd)");
+    eprintln!("  vader run   [path]      compile and run (defaults to ./ , the project/main.vd)");
+    eprintln!("       --out <path>  set the output binary (build);  --tls  link OpenSSL (DB drivers)");
+    eprintln!("  vader llvm  <file.vd>   low-level alias: compile via LLVM IR + clang and run");
     eprintln!("  vader lsp              language server (stdio) — diagnostics for editors");
     eprintln!("  vader version          print the version");
 }
@@ -125,9 +129,13 @@ fn main() -> ExitCode {
     if args.get(1).map(String::as_str) == Some("test") {
         return cmd_test(&args);
     }
+    // `build`/`run` are the canonical commands: native (LLVM) backend by default,
+    // with a sensible default target (the project / main.vd).
+    if matches!(args.get(1).map(String::as_str), Some("build") | Some("run")) {
+        return cmd_build_run(&args, args[1] == "run");
+    }
 
-    let valid =
-        args.len() >= 3 && matches!(args[1].as_str(), "lex" | "parse" | "check" | "build" | "run");
+    let valid = args.len() >= 3 && matches!(args[1].as_str(), "lex" | "parse" | "check");
     if !valid {
         usage();
         return ExitCode::FAILURE;
@@ -191,7 +199,7 @@ fn main() -> ExitCode {
     finish(command, path, program, false)
 }
 
-/// Post-parse: type-check, architecture lint and (build/run) generate Go and compile.
+/// Post-parse handler for `vader check`: type-check + architecture lint.
 fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode {
     if let Err(errors) = check::check(&program) {
         for e in &errors {
@@ -201,69 +209,117 @@ fn finish(command: &str, path: &str, program: Program, is_dir: bool) -> ExitCode
         return ExitCode::FAILURE;
     }
 
-    // architecture: enforced automatically (only for a standalone file; a dir has no single layer)
-    if !is_dir && !lint_gate(path, &program.imports) {
-        eprintln!("architecture violation(s); aborting");
+    // convention + architecture rules (snake_case names, layer dependencies), hard-fail.
+    let _ = is_dir;
+    if !enforce(path) {
         return ExitCode::FAILURE;
     }
 
-    if command == "check" {
-        println!("ok: no type errors in `{}`", path);
-        return ExitCode::SUCCESS;
+    let _ = command; // only `check` reaches here (build/run go through the native backend)
+    println!("ok: no type errors in `{}`", path);
+    ExitCode::SUCCESS
+}
+
+/// When `build`/`run` get no path, pick a sensible default: the project in the
+/// current directory (a `vader.toml`/`cmd/main.vd` marks one), else a loose `main.vd`.
+fn default_target() -> String {
+    if Path::new("cmd/main.vd").exists() || Path::new("vader.toml").exists() {
+        ".".to_string()
+    } else if Path::new("main.vd").exists() {
+        "main.vd".to_string()
+    } else {
+        ".".to_string()
+    }
+}
+
+/// Where `vader build` writes the binary when `--out` isn't given. A single file
+/// builds to `./<stem>`; a project dir builds to a binary named after the folder,
+/// placed inside it (so it can't collide with the directory entry itself).
+fn default_bin_name(path: &str) -> String {
+    let p = Path::new(path);
+    if p.is_dir() {
+        if path == "." {
+            let name = std::env::current_dir()
+                .ok()
+                .and_then(|d| d.file_name().map(|s| s.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "app".to_string());
+            name
+        } else {
+            let name = p
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "app".to_string());
+            p.join(name).to_string_lossy().to_string()
+        }
+    } else {
+        p.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "a.out".to_string())
+    }
+}
+
+/// `vader build [path] [--out X] [--tls]` and `vader run [path] [--tls]`.
+/// Native (LLVM) backend; `build` compiles to a binary, `run` compiles and runs.
+/// With no `path`, targets the project / `main.vd` in the current directory.
+fn cmd_build_run(args: &[String], run: bool) -> ExitCode {
+    let tls = args.iter().any(|a| a == "--tls");
+    // first non-flag arg after the subcommand is the path; `--out <p>` sets the binary path.
+    let mut path: Option<String> = None;
+    let mut out_flag: Option<String> = None;
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--out" => {
+                out_flag = args.get(i + 1).cloned();
+                i += 2;
+            }
+            a if a.starts_with("--") => i += 1,
+            _ => {
+                if path.is_none() {
+                    path = Some(args[i].clone());
+                }
+                i += 1;
+            }
+        }
+    }
+    let path = path.unwrap_or_else(default_target);
+
+    // Native backend: needs a POSIX toolchain (clang + the C runtime).
+    if cfg!(target_os = "windows") {
+        eprintln!(
+            "error: the native backend needs a POSIX toolchain (clang + the C runtime),\n\
+             which isn't supported on native Windows yet — run it inside WSL."
+        );
+        return ExitCode::FAILURE;
     }
 
-    let go_src = match codegen::generate(&program) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{}", e);
-            return ExitCode::FAILURE;
+    // Hard-fail on convention/architecture violations before building.
+    if !enforce(&path) {
+        return ExitCode::FAILURE;
+    }
+
+    // `run` builds to a temp binary and executes it (out=None); `build` keeps the binary.
+    let out: Option<String> = if run {
+        None
+    } else {
+        Some(out_flag.unwrap_or_else(|| default_bin_name(&path)))
+    };
+
+    let result = if Path::new(&path).is_dir() {
+        match module::load(&path, false) {
+            Ok(program) => build_run_program(&program, false, tls, out.as_deref()),
+            Err(e) => Err(e),
+        }
+    } else {
+        match std::fs::read_to_string(&path) {
+            Ok(source) => build_run_source(&source, false, tls, out.as_deref()),
+            Err(e) => Err(format!("cannot read `{}`: {}", path, e)),
         }
     };
-
-    let tmp = std::env::temp_dir().join("vader_build");
-    if let Err(e) = std::fs::create_dir_all(&tmp) {
-        eprintln!("error: cannot create temp dir: {}", e);
-        return ExitCode::FAILURE;
-    }
-    let go_file = tmp.join("main.go");
-    if let Err(e) = std::fs::write(&go_file, &go_src) {
-        eprintln!("error: cannot write generated Go: {}", e);
-        return ExitCode::FAILURE;
-    }
-
-    let result = if command == "run" {
-        Command::new("go").arg("run").arg(&go_file).status()
-    } else {
-        let stem = Path::new(path)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "a.out".to_string());
-        // in a project (dir), the binary goes INSIDE the folder so it doesn't collide with it.
-        let out = if is_dir {
-            Path::new(path).join(&stem)
-        } else {
-            std::path::PathBuf::from(&stem)
-        };
-        let shown = out.display().to_string();
-        Command::new("go")
-            .arg("build")
-            .arg("-o")
-            .arg(&out)
-            .arg(&go_file)
-            .status()
-            .map(|s| {
-                if s.success() {
-                    println!("built {}", shown);
-                }
-                s
-            })
-    };
-
     match result {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
-        Ok(_) => ExitCode::FAILURE,
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: failed to invoke `go`: {} (is Go on PATH?)", e);
+            eprintln!("{}", e);
             ExitCode::FAILURE
         }
     }
@@ -468,9 +524,7 @@ fn cmd_llvm(args: &[String]) -> ExitCode {
     if cfg!(target_os = "windows") {
         eprintln!(
             "error: `vader llvm` (native backend) needs a POSIX toolchain (clang + the C runtime),\n\
-             which isn't supported on native Windows yet. Options:\n\
-             - run it inside WSL (recommended on Windows), or\n\
-             - use the Go backend: `vader build` / `vader run` (works natively on Windows)."
+             which isn't supported on native Windows yet — run it inside WSL."
         );
         return ExitCode::FAILURE;
     }
@@ -573,7 +627,7 @@ fn cached_obj(
 }
 
 /// Type-checks, generates LLVM IR, compiles with clang and runs. Used by
-/// `vader llvm <file|dir>` and `vader migrate`.
+/// `vader build`/`run` and `vader migrate`.
 fn build_run_program(
     program: &Program,
     quiet: bool,
@@ -592,7 +646,6 @@ fn build_run_program(
 
     let dir = std::env::temp_dir().join("vader_llvm");
     std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
-    let ll = dir.join("out.ll");
     let bin = match out {
         Some(p) => {
             let pb = std::path::PathBuf::from(p);
@@ -605,7 +658,34 @@ fn build_run_program(
         }
         None => dir.join("out"),
     };
-    std::fs::write(&ll, &ir).map_err(|e| format!("write IR: {}", e))?;
+
+    compile_ir(&ir, &bin, quiet, tls)?;
+
+    // `--out`: build only, don't run (for Docker / producing a deployable binary).
+    if out.is_some() {
+        if !quiet {
+            println!("built -> {}", bin.display());
+        }
+        return Ok(());
+    }
+    if !quiet {
+        println!("compiled with clang -> {}\n--- running ---", bin.display());
+    }
+    match Command::new(&bin).status() {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("the program exited with code {}", s.code().unwrap_or(-1))),
+        Err(e) => Err(format!("failed to run the binary: {}", e)),
+    }
+}
+
+/// Links generated LLVM IR into the native binary `bin`: `clang -O2` plus the cached
+/// C-runtime objects the IR actually references (detected by symbol). Shared by
+/// `vader build`/`run`, `vader test` (which also pulls in the test harness), and migrations.
+fn compile_ir(ir: &str, bin: &Path, quiet: bool, tls: bool) -> Result<(), String> {
+    let dir = std::env::temp_dir().join("vader_llvm");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
+    let ll = dir.join("out.ll");
+    std::fs::write(&ll, ir).map_err(|e| format!("write IR: {}", e))?;
     if !quiet {
         println!("emitted LLVM IR: {}", ll.display());
     }
@@ -618,6 +698,10 @@ fn build_run_program(
         cmd.arg(cached_obj(&dir, "vader_mem", VADER_MEM_C, &[], quiet)?);
         cmd.arg(cached_obj(&dir, "vader_os", VADER_OS_C, &[], quiet)?);
         cmd.arg("-lpthread");
+    }
+    // `vader test`: the coverage + runner harness.
+    if ir.contains("@vader_cov") || ir.contains("@vader_test_") {
+        cmd.arg(cached_obj(&dir, "vader_test", VADER_TEST_C, &[], quiet)?);
     }
     if ir.contains("@vader_db_") {
         let hdr = dir.join("sqlite3.h");
@@ -682,26 +766,11 @@ fn build_run_program(
     if ir.contains("@vader_fmt_") {
         cmd.arg(cached_obj(&dir, "vader_fmt", VADER_FMT_C, &[], quiet)?);
     }
-    cmd.arg("-o").arg(&bin);
+    cmd.arg("-o").arg(bin);
     match cmd.status() {
-        Ok(s) if s.success() => {}
-        Ok(_) => return Err("clang failed to compile the IR".into()),
-        Err(e) => return Err(format!("failed to invoke `clang`: {} (on PATH?)", e)),
-    }
-    // `--out`: build only, don't run (for Docker / producing a deployable binary).
-    if out.is_some() {
-        if !quiet {
-            println!("built -> {}", bin.display());
-        }
-        return Ok(());
-    }
-    if !quiet {
-        println!("compiled with clang -> {}\n--- running ---", bin.display());
-    }
-    match Command::new(&bin).status() {
         Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("the program exited with code {}", s.code().unwrap_or(-1))),
-        Err(e) => Err(format!("failed to run the binary: {}", e)),
+        Ok(_) => Err("clang failed to compile the IR".into()),
+        Err(e) => Err(format!("failed to invoke `clang`: {} (on PATH?)", e)),
     }
 }
 
@@ -928,8 +997,10 @@ fn cmd_new(args: &[String]) -> ExitCode {
         }
     }
 
-    // `tdd` is the turnkey API architecture: native HTTP router + DB-from-env + health-check.
-    if arch == "tdd" {
+    // Turnkey API architectures: a full vertical slice (HTTP router + DB-from-env +
+    // health-check + Dockerfile + compose), laid out per the chosen architecture.
+    // `tdd` is the simple flat layout; clean/hexagonal/mvc/ddd are layered (enforced).
+    if kind == "api" && matches!(arch.as_str(), "tdd" | "clean" | "hexagonal" | "mvc" | "ddd") {
         let db = match db_flag.or_else(prompt_database) {
             Some(d) => d,
             None => return ExitCode::FAILURE,
@@ -938,14 +1009,22 @@ fn cmd_new(args: &[String]) -> ExitCode {
             eprintln!("error: unknown database `{}` (sqlite|postgres|mysql|mongo)", db);
             return ExitCode::FAILURE;
         }
-        return match scaffold::create_api_tdd(name, &db) {
+        // Mongo only has a flat (tdd) template for now; the layered archs use SQL.
+        if db == "mongo" && arch != "tdd" {
+            eprintln!(
+                "error: the `{}` architecture template uses SQL; for mongo use `--arch tdd`",
+                arch
+            );
+            return ExitCode::FAILURE;
+        }
+        return match scaffold::create_api(name, &db, &arch) {
             Ok(created) => {
-                println!("created `{}` (api / tdd, {}):", name, db);
+                println!("created `{}` (api / {}, {}):", name, arch, db);
                 for path in &created {
                     println!("  {}", path);
                 }
                 println!(
-                    "\nnext:\n  cd {name}\n  cp .env.example .env    # set DATABASE_URL\n  vader llvm .            # build + run natively\n\nroutes: GET /health, GET /users, POST /users"
+                    "\nnext:\n  cd {name}\n  cp .env.example .env    # set DATABASE_URL\n  vader test              # run the test suite (native, no toolchain deps)\n  vader run               # build + run natively\n  # ...or the whole stack (app + database) in containers:\n  docker compose up\n\nroutes: GET /health, GET /users, POST /users"
                 );
                 ExitCode::SUCCESS
             }
@@ -957,7 +1036,7 @@ fn cmd_new(args: &[String]) -> ExitCode {
     }
 
     if !matches!(arch.as_str(), "clean" | "hexagonal" | "mvc" | "minimal") {
-        eprintln!("error: unknown arch `{}` (clean|hexagonal|mvc|minimal|tdd)", arch);
+        eprintln!("error: unknown arch `{}` (clean|hexagonal|mvc|ddd|minimal|tdd)", arch);
         return ExitCode::FAILURE;
     }
 
@@ -967,7 +1046,7 @@ fn cmd_new(args: &[String]) -> ExitCode {
             for path in &created {
                 println!("  {}", path);
             }
-            println!("\nnext:\n  cd {}\n  vader run cmd/main.vd", name);
+            println!("\nnext:\n  cd {}\n  vader run", name);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -1007,30 +1086,14 @@ fn prompt_database() -> Option<String> {
     }
 }
 
-/// Runs the architecture linter if there is `architecture` in vader.toml.
-/// Returns `true` if there are no errors (warnings do not block).
-fn lint_gate(file: &str, imports: &[String]) -> bool {
-    let arch = match read_architecture() {
-        Some(a) => a,
-        None => return true, // no architecture configured => no rules
-    };
-    let mut ok = true;
-    for f in lint::lint(&arch, file, imports) {
-        let mark = match f.severity {
-            lint::Severity::Error => {
-                ok = false;
-                "\u{1F534} error"
-            }
-            lint::Severity::Warning => "\u{1F7E1} warning",
-        };
-        eprintln!("{} [{}] {}", mark, f.rule, f.message);
-    }
-    ok
-}
-
 /// Reads `architecture = "..."` from `vader.toml` in the current directory.
 fn read_architecture() -> Option<String> {
-    let s = std::fs::read_to_string("vader.toml").ok()?;
+    read_architecture_in(".")
+}
+
+/// Reads `architecture = "..."` from `<dir>/vader.toml`.
+fn read_architecture_in(dir: &str) -> Option<String> {
+    let s = std::fs::read_to_string(Path::new(dir).join("vader.toml")).ok()?;
     for line in s.lines() {
         let l = line.trim();
         if l.starts_with("architecture") {
@@ -1040,6 +1103,92 @@ fn read_architecture() -> Option<String> {
         }
     }
     None
+}
+
+/// Recursively collects `.vd` files under `dir`, skipping `target/` and dotfolders.
+fn collect_vd(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                if name == "target" || name.starts_with('.') {
+                    continue;
+                }
+                collect_vd(&p, out);
+            } else if p.extension().and_then(|s| s.to_str()) == Some("vd") {
+                out.push(p);
+            }
+        }
+    }
+}
+
+/// Extracts the `import "..."` paths from a source file (one per line).
+fn scan_imports(src: &str) -> Vec<String> {
+    let mut v = Vec::new();
+    for line in src.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("import ") {
+            let imp = rest.trim().trim_matches('"').to_string();
+            if !imp.is_empty() {
+                v.push(imp);
+            }
+        }
+    }
+    v
+}
+
+/// Project-wide convention + architecture gate that hard-fails build/run/check.
+/// Enforces snake_case file names everywhere, plus the architecture's layer rules
+/// (read from the project's `vader.toml`). Returns `true` when nothing is violated.
+fn enforce(path: &str) -> bool {
+    let is_dir = Path::new(path).is_dir();
+    let arch = read_architecture_in(if is_dir { path } else { "." });
+
+    let mut files = Vec::new();
+    if is_dir {
+        collect_vd(Path::new(path), &mut files);
+    } else {
+        files.push(std::path::PathBuf::from(path));
+    }
+    files.sort();
+
+    let mut ok = true;
+    for f in &files {
+        let fp = f.to_string_lossy().to_string();
+        if let Some(finding) = lint::check_filename(&fp) {
+            eprintln!("\u{1F534} error [{}] {}: {}", finding.rule, f.display(), finding.message);
+            ok = false;
+        }
+        if let Some(arch) = &arch {
+            let imports = std::fs::read_to_string(f)
+                .map(|s| scan_imports(&s))
+                .unwrap_or_default();
+            for finding in lint::lint(arch, &fp, &imports) {
+                match finding.severity {
+                    lint::Severity::Error => {
+                        ok = false;
+                        eprintln!(
+                            "\u{1F534} error [{}] {}: {}",
+                            finding.rule,
+                            f.display(),
+                            finding.message
+                        );
+                    }
+                    lint::Severity::Warning => eprintln!(
+                        "\u{1F7E1} warning [{}] {}: {}",
+                        finding.rule,
+                        f.display(),
+                        finding.message
+                    ),
+                }
+            }
+        }
+    }
+    if !ok {
+        eprintln!("\nconvention/architecture violation(s) — aborting. Fix the above to build.");
+    }
+    ok
 }
 
 /// `vader lint <file.vd> [--arch <arch>]`
@@ -1128,12 +1277,12 @@ struct TestConfig {
 }
 
 /// Reads `[test]` from `vader.toml` in the current directory (very simple line parser).
-fn read_test_config() -> TestConfig {
+fn read_test_config(base: &str) -> TestConfig {
     let mut cfg = TestConfig {
         gate: false,
         min: 0.0,
     };
-    if let Ok(s) = std::fs::read_to_string("vader.toml") {
+    if let Ok(s) = std::fs::read_to_string(Path::new(base).join("vader.toml")) {
         for line in s.lines() {
             let l = line.trim();
             if l.starts_with("coverage_gate") {
@@ -1219,7 +1368,9 @@ fn cmd_test(args: &[String]) -> ExitCode {
         return install_pre_push_hook(&file);
     }
 
-    let mut cfg = read_test_config();
+    // config lives in the project's vader.toml: use the target dir, else the current dir.
+    let cfg_base = if Path::new(&file).is_dir() { file.clone() } else { ".".to_string() };
+    let mut cfg = read_test_config(&cfg_base);
     if no_gate {
         cfg.gate = false;
     }
@@ -1267,7 +1418,16 @@ fn cmd_test(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let go_src = match codegen::generate_tests(&program, cfg.gate, cfg.min) {
+    // Native test runner: compile the program in test mode (each `test` block becomes a
+    // function, plus a synthetic `main` that runs them with coverage) and execute it.
+    if cfg!(target_os = "windows") {
+        eprintln!(
+            "error: `vader test` runs natively (clang + the C runtime), which isn't supported\n\
+             on native Windows yet — run it inside WSL."
+        );
+        return ExitCode::FAILURE;
+    }
+    let ir = match llvm::generate_tests(&program, cfg.gate, cfg.min) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("{}", e);
@@ -1280,17 +1440,19 @@ fn cmd_test(args: &[String]) -> ExitCode {
         eprintln!("error: cannot create temp dir: {}", e);
         return ExitCode::FAILURE;
     }
-    let go_file = dir.join("main.go");
-    if let Err(e) = std::fs::write(&go_file, &go_src) {
-        eprintln!("error: cannot write generated Go: {}", e);
+    let bin = dir.join("tests");
+    let tls = args.iter().any(|a| a == "--tls");
+    if let Err(e) = compile_ir(&ir, &bin, true, tls) {
+        eprintln!("{}", e);
         return ExitCode::FAILURE;
     }
-
-    match Command::new("go").arg("run").arg(&go_file).status() {
-        Ok(status) if status.success() => ExitCode::SUCCESS,
+    // The binary exits 0 (all passed), 1 (a test failed) or 2 (coverage below the gate);
+    // it has already printed the per-test results and the summary.
+    match Command::new(&bin).status() {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
         Ok(_) => ExitCode::FAILURE,
         Err(e) => {
-            eprintln!("error: failed to invoke `go`: {} (is Go on PATH?)", e);
+            eprintln!("error: failed to run the test binary: {}", e);
             ExitCode::FAILURE
         }
     }

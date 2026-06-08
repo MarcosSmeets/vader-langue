@@ -209,7 +209,7 @@ impl Checker {
         // std/http: server (Server -> Unknown) + client.
         if program.imports.iter().any(|i| i.starts_with("std/http")) {
             use Ty::*;
-            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 11] = [
+            let sigs: [(&str, Vec<Ty>, Vec<Ty>); 13] = [
                 ("listen", vec![Int], vec![Unknown]),
                 ("accept", vec![Unknown], vec![Bool]),
                 ("method", vec![Unknown], vec![String]),
@@ -217,6 +217,9 @@ impl Checker {
                 ("body", vec![Unknown], vec![String]),
                 ("header", vec![Unknown, String], vec![String]),
                 ("respond", vec![Unknown, Int, String, String], vec![]),
+                // JSON is the default for APIs: `http.json(s, status, body)`.
+                ("json", vec![Unknown, Int, String], vec![]),
+                ("text", vec![Unknown, Int, String], vec![]),
                 ("get", vec![String], vec![String]),
                 ("post", vec![String, String, String], vec![String]),
                 ("newRouter", vec![], vec![Unknown]),

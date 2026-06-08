@@ -2,13 +2,22 @@
 // Linked by `clang` together with the generated LLVM IR. Memory leaks (no GC, for now).
 
 #include <pthread.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+// ---- test mode: when running `vader test`, a panic unwinds to the test harness
+// (longjmp) instead of aborting the process, so one failing assert fails just that
+// test and the rest keep running. Outside tests, g_in_test is 0 and a panic exits. ----
+int g_in_test = 0;
+jmp_buf g_test_jmp;
+
 // ---- runtime safety: panics print a message + location and abort (exit 1) ----
 void vader_panic(const char *msg) {
     fprintf(stderr, "panic: %s\n", msg);
+    if (g_in_test)
+        longjmp(g_test_jmp, 1);
     exit(1);
 }
 // slice/array bounds check: aborts if `idx` is outside [0, len).
@@ -16,6 +25,8 @@ void vader_bounds(long long idx, long long len, long long line) {
     if (idx < 0 || idx >= len) {
         fprintf(stderr, "panic: index out of bounds at line %lld: index %lld, length %lld\n",
                 line, idx, len);
+        if (g_in_test)
+            longjmp(g_test_jmp, 1);
         exit(1);
     }
 }

@@ -184,6 +184,16 @@ void vader_http_respond(void *sv, long status, const char *ctype, const char *bo
        freed in bulk on the next accept. */
 }
 
+/* JSON is the default content type for APIs — respond without spelling it out. */
+void vader_http_json(void *sv, long status, const char *body) {
+    vader_http_respond(sv, status, "application/json", body);
+}
+
+/* plain-text convenience (health probes, simple endpoints). */
+void vader_http_text(void *sv, long status, const char *body) {
+    vader_http_respond(sv, status, "text/plain; charset=utf-8", body);
+}
+
 /* ===================== client ============================================ */
 static const char *http_request(const char *method, const char *url,
                                 const char *ctype, const char *body) {

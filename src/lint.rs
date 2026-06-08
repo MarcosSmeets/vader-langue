@@ -20,33 +20,45 @@ pub struct Finding {
 }
 
 /// Layer rank (lower = more inner). `None` if the segment is not a layer.
+/// Folder names match the scaffolds (`vader new api --arch <clean|hexagonal|mvc|ddd>`).
 fn rank(arch: &str, seg: &str) -> Option<usize> {
     match arch {
         "clean" => match seg {
             "domain" => Some(0),
-            "usecase" => Some(1),
-            "adapter" => Some(2),
-            "infra" => Some(3),
+            "application" => Some(1),
+            "infrastructure" => Some(2),
+            "interfaces" => Some(3),
             _ => None,
         },
         "hexagonal" => match seg {
-            "core" | "domain" | "port" | "service" => Some(0),
-            "adapter" => Some(1),
+            "core" => Some(0),
+            "adapters" => Some(1),
+            "infrastructure" => Some(2),
             _ => None,
         },
         "mvc" => match seg {
-            "model" => Some(0),
-            "controller" | "view" => Some(1),
+            "models" => Some(0),
+            "repositories" => Some(1),
+            "services" => Some(2),
+            "controllers" | "routes" | "middleware" => Some(3),
+            _ => None,
+        },
+        // DDD layers live inside each bounded context (contexts/<ctx>/<layer>/...).
+        "ddd" => match seg {
+            "domain" => Some(0),
+            "application" => Some(1),
+            "infrastructure" => Some(2),
             _ => None,
         },
         _ => None,
     }
 }
 
-/// Rank of the outermost layer (where I/O is allowed).
-fn max_rank(arch: &str) -> usize {
+/// Innermost rank at which doing I/O (std/db, std/http, ...) is allowed: the adapter
+/// layers. Anything more inner than this must stay pure.
+fn io_floor(arch: &str) -> usize {
     match arch {
-        "clean" => 3,
+        "clean" | "ddd" => 2,
         "hexagonal" | "mvc" => 1,
         _ => 0,
     }
@@ -62,7 +74,36 @@ fn layer_of(arch: &str, path: &str) -> Option<(String, usize)> {
 }
 
 fn is_io(import: &str) -> bool {
-    import.starts_with("std/db") || import.starts_with("std/http") || import.contains("net/http")
+    import.starts_with("std/db")
+        || import.starts_with("std/http")
+        || import.starts_with("std/mongo")
+        || import.contains("net/http")
+}
+
+/// Convention check: project `.vd` files must be snake_case (lowercase, digits, `_`),
+/// starting with a letter. Catches `UserHandler.vd`, `user-handler.vd`, etc.
+pub fn check_filename(path: &str) -> Option<Finding> {
+    let p = std::path::Path::new(path);
+    let stem = p.file_stem()?.to_str()?;
+    let ok = stem
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase())
+        && stem
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if ok {
+        return None;
+    }
+    let shown = p.file_name().map(|s| s.to_string_lossy().to_string())?;
+    Some(Finding {
+        severity: Severity::Error,
+        rule: "N1",
+        message: format!(
+            "file name `{}` is not snake_case (use lowercase letters, digits and `_`, e.g. `user_handler.vd`)",
+            shown
+        ),
+    })
 }
 
 /// Runs the architecture linter over a file, given its dependencies.
@@ -74,7 +115,7 @@ pub fn lint(arch: &str, file_path: &str, imports: &[String]) -> Vec<Finding> {
     };
 
     for imp in imports {
-        if frank < max_rank(arch) && is_io(imp) {
+        if frank < io_floor(arch) && is_io(imp) {
             out.push(Finding {
                 severity: Severity::Error,
                 rule: "R3",
@@ -111,22 +152,22 @@ mod tests {
     }
 
     #[test]
-    fn domain_importing_infra_is_an_error() {
-        let f = errors("clean", "loja/domain/user.vd", &["loja/infra/db"]);
+    fn domain_importing_infrastructure_is_an_error() {
+        let f = errors("clean", "loja/domain/user.vd", &["loja/infrastructure/db"]);
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].rule, "R1");
         assert_eq!(f[0].severity, Severity::Error);
     }
 
     #[test]
-    fn infra_importing_domain_is_fine() {
-        let f = errors("clean", "loja/infra/db/repo.vd", &["loja/domain"]);
+    fn infrastructure_importing_domain_is_fine() {
+        let f = errors("clean", "loja/infrastructure/db/repo.vd", &["loja/domain"]);
         assert!(f.is_empty());
     }
 
     #[test]
-    fn usecase_importing_infra_is_an_error() {
-        let f = errors("clean", "loja/usecase/create.vd", &["loja/infra/db"]);
+    fn application_importing_infrastructure_is_an_error() {
+        let f = errors("clean", "loja/application/create.vd", &["loja/infrastructure/db"]);
         assert_eq!(f.len(), 1);
     }
 
@@ -138,14 +179,31 @@ mod tests {
     }
 
     #[test]
-    fn infra_doing_io_is_fine() {
-        let f = errors("clean", "loja/infra/db/repo.vd", &["std/db/postgres"]);
+    fn infrastructure_doing_io_is_fine() {
+        let f = errors("clean", "loja/infrastructure/db/repo.vd", &["std/db/postgres"]);
         assert!(f.is_empty());
     }
 
     #[test]
     fn hexagonal_core_importing_adapter_is_an_error() {
-        let f = errors("hexagonal", "app/core/service/s.vd", &["app/adapter/outbound/db"]);
+        let f = errors("hexagonal", "app/core/service/s.vd", &["app/adapters/outbound/db"]);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn ddd_domain_importing_infrastructure_is_an_error() {
+        let f = errors(
+            "ddd",
+            "app/contexts/users/domain/entity/user.vd",
+            &["app/contexts/users/infrastructure/db"],
+        );
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].rule, "R1");
+    }
+
+    #[test]
+    fn mvc_model_importing_controller_is_an_error() {
+        let f = errors("mvc", "app/models/user.vd", &["app/controllers/user_controller"]);
         assert_eq!(f.len(), 1);
     }
 
@@ -153,5 +211,18 @@ mod tests {
     fn minimal_has_no_rules() {
         let f = errors("minimal", "app/src/foo.vd", &["app/src/bar", "std/db"]);
         assert!(f.is_empty());
+    }
+
+    #[test]
+    fn snake_case_filenames_pass() {
+        assert!(check_filename("app/domain/user_repository.vd").is_none());
+        assert!(check_filename("app/cmd/main.vd").is_none());
+    }
+
+    #[test]
+    fn non_snake_case_filenames_fail() {
+        assert_eq!(check_filename("app/UserRepository.vd").unwrap().rule, "N1");
+        assert_eq!(check_filename("app/user-repository.vd").unwrap().rule, "N1");
+        assert_eq!(check_filename("app/2cool.vd").unwrap().rule, "N1");
     }
 }
